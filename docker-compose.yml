@@ -1,0 +1,92 @@
+services:
+
+  agent:
+    build:
+      context: .
+    container_name: musya_agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: chat-aio
+      DB_USER: postgres
+      DB_PASSWORD: 1234
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: uploads
+      MINIO_USE_SSL: "false"
+      CHROMA_PERSIST_DIR: /app/chroma_data
+      CHROMA_COLLECTION: musya_documents
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/app/chroma_data
+    networks:
+      - chatv1_net
+
+  # Reuse ChatV1 infrastructure
+  postgres:
+    image: postgres:16
+    container_name: chatv1_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chat-aio
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1234
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../ChatV1/database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d chat-aio"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chatv1_net
+
+  minio:
+    image: minio/minio:latest
+    container_name: chatv1_minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chatv1_net
+
+volumes:
+  pgdata:
+    name: chatv1_pgdata
+  minio_data:
+    name: chatv1_minio_data
+  chroma_data:
+    name: musya_chroma_data
+
+networks:
+  chatv1_net:
+    name: chatv1_net
+    driver: bridge

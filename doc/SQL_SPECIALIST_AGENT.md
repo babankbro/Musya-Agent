@@ -1,0 +1,528 @@
+# SQL Specialist Agent Documentation
+
+## Overview
+
+The **SQL Specialist Agent** is a new agent added to the Musya Agent pipeline that provides advanced database querying capabilities. It understands the accident database schema deeply and can write custom SQL queries to answer complex questions that pre-built tools cannot handle.
+
+---
+
+## Agent Architecture
+
+### Position in Pipeline
+
+```
+User Query
+    ↓
+1. Request Interpreter (understand intent)
+    ↓
+2. Retrieval Agent (fetch data using pre-built tools)
+    ↓
+3. SQL Specialist ⭐ NEW (custom SQL queries if needed)
+    ↓
+4. Analyst (analyze data)
+    ↓
+5. Chart Builder (create visualizations)
+    ↓
+6. Report Writer (generate final report)
+```
+
+### Agent Details
+
+**File**: `src/agents/sql_specialist.py`
+
+**Role**: SQL Database Specialist
+
+**Goal**: เข้าใจโครงสร้างฐานข้อมูลอุบัติเหตุและเขียน SQL query ที่ซับซ้อนเพื่อดึงข้อมูลตามที่ต้องการ
+
+**Tools**:
+- `execute_custom_sql` - Execute SELECT queries
+- `explain_schema` - Get table schema information
+- `get_table_row_count` - Count rows in tables
+
+---
+
+## When SQL Specialist Activates
+
+The SQL Specialist agent runs **after** the Retrieval agent and will:
+
+1. **Analyze** if data from retrieval tools is sufficient
+2. **Skip** if pre-built tools already provided enough data
+3. **Execute custom SQL** if:
+   - User asks for specific data combinations not covered by tools
+   - User requests data filtering/grouping not available in tools
+   - User needs cross-table analysis
+   - User asks for specific provinces, years, or conditions
+
+### Example Scenarios
+
+#### ✅ SQL Specialist Needed:
+- "จำนวนอุบัติเหตุของจังหวัดอุบลราชธานีแต่ละปี" (specific province yearly breakdown)
+- "เปรียบเทียบอัตราเสียชีวิตระหว่าง 3 จังหวัด" (multi-province comparison)
+- "ถนนที่มีอุบัติเหตุมากกว่า 50 ครั้งในปี 2023" (custom threshold filtering)
+- "อุบัติเหตุที่เกิดในช่วงเช้าของวันเสาร์-อาทิตย์" (complex time filtering)
+
+#### ❌ SQL Specialist NOT Needed:
+- "สรุปอุบัติเหตุรายเดือน" (covered by `get_accident_summary`)
+- "Top 10 จุดเสี่ยง" (covered by `get_accident_hotspots`)
+- "สถิติจังหวัดเชียงใหม่" (covered by `get_province_year_summary`)
+
+---
+
+## Database Schema Knowledge
+
+The SQL Specialist has deep knowledge of:
+
+### Fact Tables
+- **fact_accident_event** - Main accident events (100K+ rows)
+  - Key columns: `event_datetime`, `geography_id`, `death_count`, `injured_count`, `serious_injured`, `csv_year`
+  
+- **fact_accident_person** - Person-level details
+  - Key columns: `accident_id`, `age`, `sex`, `injury_level`
+
+### Dimension Tables
+- **dim_geography** - Provinces, districts (77 provinces)
+  - Key columns: `geography_id`, `province_name`, `latitude`, `longitude`
+  
+- **dim_road_segment** - Roads (1000+ roads)
+  - Key columns: `road_segment_id`, `road_name`, `road_code`, `geography_id`, `km_marker`
+  
+- **dim_time** - Time dimension (2020-2030)
+  - Key columns: `full_date`, `year_no`, `month_no`, `day_of_week`
+
+### Mart Tables (Pre-aggregated - Fast Queries)
+- **mart_accident_summary** - Monthly summaries
+- **mart_accident_hotspot** - High-risk locations
+- **mart_province_year** - Province yearly stats
+- **mart_province_road** - Province road breakdown
+
+---
+
+## SQL Query Patterns
+
+### Pattern 1: Province Yearly Breakdown
+
+**Question**: "จำนวนอุบัติเหตุของจังหวัดอุบลราชธานีแต่ละปี"
+
+**SQL**:
+```sql
+SELECT 
+    f.csv_year AS accident_year,
+    COUNT(f.accident_id) AS total_accidents,
+    SUM(f.death_count) AS total_deaths,
+    SUM(f.injured_count) AS total_injured
+FROM fact_accident_event f
+JOIN dim_geography g ON f.geography_id = g.geography_id
+WHERE g.province_name LIKE '%อุบลราชธานี%'
+GROUP BY f.csv_year
+ORDER BY f.csv_year ASC;
+```
+
+**Why Custom SQL**: Pre-built tools don't support single province yearly trend with this exact format.
+
+---
+
+### Pattern 2: Top Dangerous Roads
+
+**Question**: "Top 10 ถนนที่มีอุบัติเหตุมากที่สุดในภาคเหนือ"
+
+**SQL**:
+```sql
+SELECT 
+    r.road_name,
+    r.road_code,
+    g.province_name,
+    COUNT(f.accident_id) AS accident_count,
+    SUM(f.death_count) AS total_deaths
+FROM fact_accident_event f
+JOIN dim_road_segment r ON f.road_segment_id = r.road_segment_id
+JOIN dim_geography g ON r.geography_id = g.geography_id
+WHERE g.province_name IN ('เชียงใหม่', 'เชียงราย', 'ลำปาง', 'พะเยา', 'แพร่', 'น่าน', 'ลำพูน', 'แม่ฮ่องสอน')
+GROUP BY r.road_name, r.road_code, g.province_name
+ORDER BY accident_count DESC
+LIMIT 10;
+```
+
+**Why Custom SQL**: Filtering by region (multiple provinces) requires custom WHERE clause.
+
+---
+
+### Pattern 3: Time-based Analysis
+
+**Question**: "อุบัติเหตุที่เกิดในช่วงเช้า (06:00-12:00) ของวันหยุดสุดสัปดาห์"
+
+**SQL**:
+```sql
+SELECT 
+    DATE(event_datetime) AS accident_date,
+    EXTRACT(DOW FROM event_datetime) AS day_of_week,
+    COUNT(*) AS accident_count,
+    SUM(death_count) AS deaths
+FROM fact_accident_event
+WHERE EXTRACT(HOUR FROM event_datetime) BETWEEN 6 AND 11
+  AND EXTRACT(DOW FROM event_datetime) IN (0, 6)  -- Sunday=0, Saturday=6
+GROUP BY DATE(event_datetime), EXTRACT(DOW FROM event_datetime)
+ORDER BY accident_count DESC
+LIMIT 20;
+```
+
+**Why Custom SQL**: Complex time filtering (hour + day of week) not available in tools.
+
+---
+
+### Pattern 4: Comparative Analysis
+
+**Question**: "เปรียบเทียบอัตราเสียชีวิตระหว่างกรุงเทพ เชียงใหม่ และภูเก็ต"
+
+**SQL**:
+```sql
+SELECT 
+    province_name,
+    year_no,
+    accident_count,
+    death_count,
+    ROUND(death_count::NUMERIC / NULLIF(accident_count, 0) * 100, 2) AS fatality_rate_pct
+FROM mart_province_year
+WHERE province_name IN ('กรุงเทพมหานคร', 'เชียงใหม่', 'ภูเก็ต')
+  AND year_no >= 2020
+ORDER BY province_name, year_no;
+```
+
+**Why Custom SQL**: Multi-province comparison with calculated fatality rate.
+
+---
+
+## Tools Reference
+
+### 1. execute_custom_sql
+
+**Purpose**: Execute custom SELECT queries
+
+**Parameters**:
+- `sql_query` (str): SQL SELECT or WITH query
+
+**Returns**: JSON with `success`, `rows`, `row_count`
+
+**Safety Features**:
+- ✅ Only SELECT/WITH allowed
+- ❌ Blocks INSERT, UPDATE, DELETE, DROP
+- 🔒 Auto-adds LIMIT 1000 if missing
+- 🧹 Converts Decimal/datetime to JSON-safe types
+
+**Example**:
+```python
+execute_custom_sql("""
+    SELECT province_name, SUM(accident_count) as total
+    FROM mart_province_year
+    WHERE year_no = 2023
+    GROUP BY province_name
+    ORDER BY total DESC
+    LIMIT 10
+""")
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "rows": [
+    {"province_name": "กรุงเทพมหานคร", "total": 1234},
+    {"province_name": "เชียงใหม่", "total": 987}
+  ],
+  "row_count": 10,
+  "query": "SELECT ..."
+}
+```
+
+---
+
+### 2. explain_schema
+
+**Purpose**: Get table structure and sample data
+
+**Parameters**:
+- `table_name` (str): Table name (optional, empty = list all tables)
+
+**Returns**: JSON with columns, types, sample rows
+
+**Example**:
+```python
+explain_schema("fact_accident_event")
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "table_name": "fact_accident_event",
+  "columns": [
+    {"name": "accident_id", "type": "bigint", "nullable": false},
+    {"name": "event_datetime", "type": "timestamp", "nullable": true},
+    {"name": "death_count", "type": "integer", "nullable": true}
+  ],
+  "column_count": 15,
+  "sample_rows": [...]
+}
+```
+
+---
+
+### 3. get_table_row_count
+
+**Purpose**: Count rows in a table
+
+**Parameters**:
+- `table_name` (str): Table name
+
+**Returns**: JSON with row count
+
+**Example**:
+```python
+get_table_row_count("fact_accident_event")
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "table_name": "fact_accident_event",
+  "row_count": 123456
+}
+```
+
+---
+
+## Best Practices
+
+### 1. Prefer Mart Tables for Speed
+```sql
+-- ❌ Slow (fact table scan)
+SELECT year_no, COUNT(*) 
+FROM fact_accident_event 
+WHERE geography_id = 123 
+GROUP BY year_no;
+
+-- ✅ Fast (mart table, pre-aggregated)
+SELECT year_no, accident_count 
+FROM mart_province_year 
+WHERE province_name = 'เชียงใหม่';
+```
+
+### 2. Use LIKE for Province Search
+```sql
+-- ✅ Flexible (handles typos, partial names)
+WHERE province_name LIKE '%เชียงใหม่%'
+
+-- ❌ Exact match only
+WHERE province_name = 'เชียงใหม่'
+```
+
+### 3. Avoid Division by Zero
+```sql
+-- ✅ Safe
+ROUND(death_count::NUMERIC / NULLIF(accident_count, 0) * 100, 2)
+
+-- ❌ Can crash
+death_count / accident_count
+```
+
+### 4. Use Indexed Columns
+```sql
+-- ✅ Fast (csv_year is indexed)
+WHERE csv_year = 2023
+
+-- ❌ Slower (function on indexed column)
+WHERE EXTRACT(YEAR FROM event_datetime) = 2023
+```
+
+### 5. Limit Result Sets
+```sql
+-- ✅ Always use LIMIT for large queries
+SELECT * FROM fact_accident_event LIMIT 100;
+
+-- Tool auto-adds LIMIT 1000 if missing
+```
+
+---
+
+## Integration Example
+
+### User Query Flow
+
+**User**: "จำนวนอุบัติเหตุของจังหวัดอุบลราชธานีแต่ละปี"
+
+**Step 1 - Request Interpreter**:
+```
+Topic: accident
+Geography: อุบลราชธานี
+Time: yearly trend
+```
+
+**Step 2 - Retrieval Agent**:
+```
+Calls: get_province_year_summary(province="อุบลราชธานี")
+Result: Province summary data (all years aggregated)
+```
+
+**Step 3 - SQL Specialist** ⭐:
+```
+Analysis: Retrieval tool gives summary, but user wants yearly breakdown
+Decision: Execute custom SQL
+
+SQL:
+SELECT csv_year, COUNT(*) as accidents, SUM(death_count) as deaths
+FROM fact_accident_event f
+JOIN dim_geography g ON f.geography_id = g.geography_id
+WHERE g.province_name LIKE '%อุบลราชธานี%'
+GROUP BY csv_year
+ORDER BY csv_year;
+
+Result: 
+[
+  {csv_year: 2020, accidents: 145, deaths: 12},
+  {csv_year: 2021, accidents: 167, deaths: 15},
+  ...
+]
+```
+
+**Step 4 - Analyst**:
+```
+Analyzes both retrieval data + SQL results
+Identifies trends, patterns
+```
+
+**Step 5 - Chart Builder**:
+```
+Creates line chart showing yearly trend
+```
+
+**Step 6 - Report Writer**:
+```
+Generates final report with insights
+```
+
+---
+
+## Error Handling
+
+### Invalid SQL
+```json
+{
+  "success": false,
+  "error": "Only SELECT or WITH queries are allowed",
+  "rows": []
+}
+```
+
+### Table Not Found
+```json
+{
+  "success": false,
+  "error": "Table 'invalid_table' not found",
+  "available_tables": ["fact_accident_event", ...]
+}
+```
+
+### SQL Syntax Error
+```json
+{
+  "success": false,
+  "error": "syntax error at or near 'FORM'",
+  "query": "SELECT * FORM fact_accident_event"
+}
+```
+
+---
+
+## Testing
+
+### Test SQL Specialist Directly
+
+Use the test UI endpoint:
+
+```bash
+curl -X POST http://localhost:8000/api/test/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sql": "SELECT province_name, SUM(accident_count) FROM mart_province_year GROUP BY province_name LIMIT 5"
+  }'
+```
+
+### Test via Chat
+
+```
+User: "หาจำนวนอุบัติเหตุของจังหวัดอุบลราชธานีแต่ละปี"
+```
+
+Check logs for SQL Specialist task output.
+
+---
+
+## Performance Considerations
+
+### Query Optimization
+
+| Query Type | Estimated Time | Recommendation |
+|------------|---------------|----------------|
+| Mart table (aggregated) | ~5-10ms | ✅ Preferred |
+| Fact table with index | ~20-50ms | ✅ OK |
+| Fact table full scan | ~200-500ms | ⚠️ Avoid |
+| Complex JOIN (3+ tables) | ~50-200ms | ⚠️ Use sparingly |
+
+### Data Volume
+
+- **fact_accident_event**: ~100K rows (2020-2026)
+- **mart_province_year**: ~500 rows (77 provinces × 7 years)
+- **mart_province_road**: ~5K rows
+
+**Rule**: Always prefer mart tables for aggregated queries.
+
+---
+
+## Future Enhancements
+
+1. **Query Caching**: Cache frequent queries (e.g., province summaries)
+2. **Query Templates**: Pre-defined templates for common patterns
+3. **Natural Language to SQL**: LLM-powered SQL generation from Thai questions
+4. **Query Validation**: Syntax check before execution
+5. **Result Formatting**: Auto-format results as tables/charts
+
+---
+
+## Troubleshooting
+
+### Issue: SQL Specialist always skips
+
+**Cause**: Retrieval tools provide sufficient data
+
+**Solution**: Check if pre-built tools already cover the use case
+
+---
+
+### Issue: Query timeout
+
+**Cause**: Complex query or large result set
+
+**Solution**: 
+- Add WHERE clause to filter data
+- Use mart tables instead of fact tables
+- Add LIMIT clause
+
+---
+
+### Issue: Wrong results
+
+**Cause**: Incorrect JOIN or WHERE clause
+
+**Solution**:
+- Use `explain_schema` to verify column names
+- Check sample data with LIMIT 5
+- Verify province names with LIKE '%name%'
+
+---
+
+## Related Documentation
+
+- **Database Schema**: `doc/DATABASE_API_ARCHITECTURE.md`
+- **CSV Field Mapping**: `database/CSV_FIELD_MAPPING.md`
+- **Agent Tools**: `src/tools/sql_tools.py`
+- **Orchestrator**: `src/agents/orchestrator.py`
