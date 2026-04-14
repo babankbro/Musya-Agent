@@ -1,30 +1,93 @@
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+"""Vector store backed by PostgreSQL + pgvector (replaces ChromaDB).
+
+Embeddings are generated via Google Gemini text-embedding-004 API (768-dim).
+No local model download required — uses the existing GEMINI_API_KEY.
+"""
+import logging
+from typing import Any
+
+import psycopg2
+import psycopg2.extras
+from google import genai
+from google.genai import types as genai_types
+
 from src.config import get_settings
 
-_chroma_client: chromadb.ClientAPI | None = None
+logger = logging.getLogger(__name__)
+
+_client: genai.Client | None = None
+_conn: Any | None = None
+
+_EMBEDDING_DIM = 768  # text-embedding-004 output dimension
 
 
-def get_chroma_client() -> chromadb.ClientAPI:
-    """Get or create persistent ChromaDB client."""
-    global _chroma_client
-    if _chroma_client is None:
+def _get_client() -> genai.Client:
+    """Get (and cache) the Google Gemini client."""
+    global _client
+    if _client is None:
         s = get_settings()
-        _chroma_client = chromadb.PersistentClient(
-            path=s.CHROMA_PERSIST_DIR,
-            settings=ChromaSettings(anonymized_telemetry=False),
+        _client = genai.Client(api_key=s.GEMINI_API_KEY)
+        logger.info("Google Gemini embedding client created: %s", s.EMBEDDING_MODEL)
+    return _client
+
+
+def _get_conn():
+    """Get (and cache) a psycopg2 connection with pgvector support."""
+    global _conn
+    if _conn is None or _conn.closed:
+        s = get_settings()
+        _conn = psycopg2.connect(
+            host=s.DB_HOST,
+            port=s.DB_PORT,
+            dbname=s.DB_NAME,
+            user=s.DB_USER,
+            password=s.DB_PASSWORD,
         )
-    return _chroma_client
+        _conn.autocommit = False
+        psycopg2.extras.register_uuid(_conn)
+        with _conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            _conn.commit()
+    return _conn
 
 
-def get_collection(name: str | None = None) -> chromadb.Collection:
-    """Get or create the document collection."""
+def _embed(texts: list[str]) -> list[list[float]]:
+    """Embed a list of texts using Google Gemini text-embedding-004."""
     s = get_settings()
-    client = get_chroma_client()
-    return client.get_or_create_collection(
-        name=name or s.CHROMA_COLLECTION,
-        metadata={"hnsw:space": "cosine"},
+    client = _get_client()
+    vectors = []
+    for text in texts:
+        response = client.models.embed_content(
+            model=s.EMBEDDING_MODEL,
+            contents=text,
+            config=genai_types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+        )
+        vectors.append(response.embeddings[0].values)
+    return vectors
+
+
+def _embed_query(text: str) -> list[float]:
+    """Embed a single query string (task_type=RETRIEVAL_QUERY)."""
+    s = get_settings()
+    client = _get_client()
+    response = client.models.embed_content(
+        model=s.EMBEDDING_MODEL,
+        contents=text,
+        config=genai_types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
     )
+    return response.embeddings[0].values
+
+
+def health_check() -> bool:
+    """Check pgvector connectivity — used by health endpoint."""
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        return True
+    except Exception as e:
+        logger.warning("pgvector health check failed: %s", e)
+        return False
 
 
 def add_documents(
@@ -33,13 +96,55 @@ def add_documents(
     metadatas: list[dict] | None = None,
     collection_name: str | None = None,
 ) -> None:
-    """Add document chunks to the vector store."""
-    collection = get_collection(collection_name)
-    collection.add(
-        ids=ids,
-        documents=documents,
-        metadatas=metadatas,
-    )
+    """Embed and upsert document chunks into document_embeddings."""
+    s = get_settings()
+    collection = collection_name or s.PGVECTOR_COLLECTION
+    metadatas = metadatas or [{} for _ in ids]
+
+    vectors = _embed(documents)
+    conn = _get_conn()
+
+    try:
+        with conn.cursor() as cur:
+            for doc_id, text, vec, meta in zip(ids, documents, vectors, metadatas):
+                cur.execute(
+                    """
+                    INSERT INTO document_embeddings
+                        (id, collection, document, embedding,
+                         source, title, topic, chunk_index, total_chunks,
+                         page_ref, section_label, total_pages)
+                    VALUES (%s, %s, %s, %s::vector, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        document       = EXCLUDED.document,
+                        embedding      = EXCLUDED.embedding,
+                        source         = EXCLUDED.source,
+                        title          = EXCLUDED.title,
+                        topic          = EXCLUDED.topic,
+                        chunk_index    = EXCLUDED.chunk_index,
+                        total_chunks   = EXCLUDED.total_chunks,
+                        page_ref       = EXCLUDED.page_ref,
+                        section_label  = EXCLUDED.section_label,
+                        total_pages    = EXCLUDED.total_pages
+                    """,
+                    (
+                        doc_id,
+                        collection,
+                        text,
+                        vec,
+                        meta.get("source", ""),
+                        meta.get("title", ""),
+                        meta.get("topic", ""),
+                        meta.get("chunk_index", -1),
+                        meta.get("total_chunks", 0),
+                        meta.get("page_ref", ""),
+                        meta.get("section_label", ""),
+                        meta.get("total_pages", 0),
+                    ),
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def search_documents(
@@ -48,23 +153,54 @@ def search_documents(
     where: dict | None = None,
     collection_name: str | None = None,
 ) -> list[dict]:
-    """Semantic search over document chunks."""
-    collection = get_collection(collection_name)
-    kwargs: dict = {"query_texts": [query], "n_results": n_results}
-    if where:
-        kwargs["where"] = where
-    results = collection.query(**kwargs)
+    """Semantic search using cosine similarity via pgvector."""
+    s = get_settings()
+    collection = collection_name or s.PGVECTOR_COLLECTION
 
+    query_vec = _embed_query(query)
+
+    # Build optional WHERE filter (supports topic filter used by document_rag.search)
+    extra_where = ""
+    params: list[Any] = [query_vec, collection, n_results]
+    if where:
+        conditions = []
+        for key, value in where.items():
+            conditions.append(f"{key} = %s")
+            params.insert(-1, value)  # inject before LIMIT param
+        extra_where = "AND " + " AND ".join(conditions)
+
+    sql = f"""
+        SELECT id, document, source, title, topic,
+               chunk_index, total_chunks, page_ref, section_label, total_pages,
+               1 - (embedding <=> %s::vector) AS similarity
+        FROM   document_embeddings
+        WHERE  collection = %s
+               {extra_where}
+        ORDER  BY embedding <=> %s::vector
+        LIMIT  %s
+    """
+    # cosine distance query needs the vector twice (once for similarity calc, once for ORDER BY)
+    params = [query_vec, collection] + (list(where.values()) if where else []) + [query_vec, n_results]
+
+    conn = _get_conn()
     docs = []
-    if results and results["documents"]:
-        for i, doc_text in enumerate(results["documents"][0]):
-            entry = {
-                "text": doc_text,
-                "distance": results["distances"][0][i] if results.get("distances") else None,
-            }
-            if results.get("metadatas") and results["metadatas"][0]:
-                entry["metadata"] = results["metadatas"][0][i]
-            if results.get("ids") and results["ids"][0]:
-                entry["id"] = results["ids"][0][i]
-            docs.append(entry)
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        for row in rows:
+            docs.append({
+                "id": row["id"],
+                "text": row["document"],
+                "distance": float(1 - row["similarity"]),  # cosine distance (lower = closer)
+                "metadata": {
+                    "source": row["source"],
+                    "title": row["title"],
+                    "topic": row["topic"],
+                    "chunk_index": row["chunk_index"],
+                    "total_chunks": row["total_chunks"],
+                    "page_ref": row["page_ref"],
+                    "section_label": row["section_label"],
+                    "total_pages": row["total_pages"],
+                },
+            })
     return docs

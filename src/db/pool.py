@@ -67,11 +67,23 @@ def get_db_connection():
         pool.putconn(conn)
 
 
-def query_db(sql: str, params: tuple | None = None) -> list[dict]:
-    """Execute a read-only query and return rows as dicts."""
+def query_db(sql: str, params: tuple | list | None = None) -> list[dict]:
+    """Execute a query and return rows as dicts (supports SELECT + RETURNING)."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
+            conn.commit()
+            if cur.description is None:
+                return []
             columns = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
             return [dict(zip(columns, row)) for row in rows]
+
+
+def execute_db(sql: str, params: tuple | list | None = None) -> int:
+    """Execute a write query (INSERT/UPDATE/DELETE) and return rowcount."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            conn.commit()
+            return cur.rowcount

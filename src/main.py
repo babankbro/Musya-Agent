@@ -8,10 +8,11 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
 from src.db.pool import get_async_pool, close_async_pool, close_sync_pool
-from src.routers import health, chat, ingest, test_ui
+from src.routers import health, chat, ingest, test_ui, evidence, upload, documents, citation
 
 # Configure logging
 logging.basicConfig(
@@ -67,10 +68,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files
+import pathlib
+static_dir = pathlib.Path(__file__).parent.parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
 # Routers
 app.include_router(health.router)
 app.include_router(chat.router)
 app.include_router(ingest.router)
+app.include_router(evidence.router)
+app.include_router(upload.router)
+app.include_router(documents.router)
+app.include_router(citation.router)
 app.include_router(test_ui.router)
 
 
@@ -90,6 +101,15 @@ async def test_ui_page():
     import pathlib
     from fastapi.responses import HTMLResponse
     html_path = pathlib.Path(__file__).parent.parent / "static" / "test_ui.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@app.get("/documents")
+async def document_upload_ui_page():
+    """Serve the Document & Citation Manager UI."""
+    import pathlib
+    from fastapi.responses import HTMLResponse
+    html_path = pathlib.Path(__file__).parent.parent / "static" / "document_upload_ui.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
 
 

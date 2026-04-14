@@ -1,4 +1,5 @@
 """Common tools shared across all domains."""
+import json
 from crewai.tools import tool
 from src.rag.document_rag import search as doc_search
 from src.db.pool import query_db
@@ -8,29 +9,42 @@ from src.db.pool import query_db
 def search_documents(topic: str, keywords: str, n_results: int = 5) -> str:
     """Search policy documents, research papers, and guidelines from the document store.
     
+    Returns a JSON array of evidence objects with full metadata for citation.
+    Each object has: evidence_type, source_ref, title, page_ref, section_label,
+    chunk_id, chunk_index, text_snippet, trust_level, original_url, distance.
+    
     Args:
         topic: Domain topic (accident, mental_health, nutrition)
         keywords: Search keywords or natural language query
         n_results: Number of results to return (default 5)
     
     Returns:
-        Relevant document chunks with source metadata.
+        JSON array of structured evidence items with source metadata.
     """
     results = doc_search(query=keywords, topic=topic if topic != "all" else None, n_results=n_results)
     if not results:
-        return "ไม่พบเอกสารที่เกี่ยวข้อง"
+        return json.dumps([], ensure_ascii=False)
 
-    output_parts = []
-    for i, r in enumerate(results, 1):
+    evidence_items = []
+    for r in results:
         meta = r.get("metadata", {})
         source = meta.get("source", "unknown")
-        chunk_idx = meta.get("chunk_index", "?")
-        distance = r.get("distance", "?")
-        output_parts.append(
-            f"--- ผลลัพธ์ {i} (source: {source}, chunk: {chunk_idx}, relevance: {distance}) ---\n"
-            f"{r['text'][:800]}"
-        )
-    return "\n\n".join(output_parts)
+        evidence_items.append({
+            "evidence_type": "document",
+            "source_ref": source,
+            "title": meta.get("title", source.rsplit("/", 1)[-1].rsplit(".", 1)[0] if "/" in source or "." in source else source),
+            "page_ref": str(meta.get("page_ref", "")),
+            "section_label": meta.get("section_label", ""),
+            "chunk_id": r.get("id", ""),
+            "chunk_index": meta.get("chunk_index", -1),
+            "total_chunks": meta.get("total_chunks", 0),
+            "text_snippet": r["text"][:500],
+            "trust_level": "high",
+            "original_url": f"minio://uploads/{source}",
+            "distance": r.get("distance"),
+        })
+
+    return json.dumps(evidence_items, ensure_ascii=False)
 
 
 @tool("get_indicator_catalog")

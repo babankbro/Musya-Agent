@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Agent project uses a **PostgreSQL database** with a multi-layered architecture designed for accident data analytics and RAG (Retrieval-Augmented Generation). The database supports both async (FastAPI endpoints) and sync (CrewAI tools) access patterns.
+The Agent project uses a **PostgreSQL database** with a multi-layered architecture designed for accident data analytics and RAG (Retrieval-Augmented Generation). Vector search is handled natively via the **pgvector** extension (replaces standalone ChromaDB), keeping all data in a single PostgreSQL instance. The database supports both async (FastAPI endpoints) and sync (CrewAI tools) access patterns.
 
 ---
 
@@ -87,16 +87,31 @@ def query_db(sql: str, params: tuple | None = None) -> list[dict]:
 1. **`document_registry`** - Document metadata
    - Tracks uploaded documents for RAG
    - Fields: `title`, `topic`, `document_type`, `effective_date`, `status`
-   - **Links to**: ChromaDB for vector embeddings
 
-2. **`document_chunks`** - Document chunks metadata
-   - Mirrors ChromaDB chunk structure
-   - Fields: `chunk_text`, `keywords`, `embedding_ref`, `page_ref`
+2. **`document_chunks`** - Document chunks metadata (**legacy, currently empty**)
+   - ⚠️ Not populated by the pgvector pipeline — chunk text and embeddings are stored in `document_embeddings`
+   - Fields: `chunk_text`, `keywords`, `embedding_ref` (would reference `document_embeddings.id`), `page_ref`
+   - **Current row count**: 0 (all RAG data is in `document_embeddings`)
 
 3. **`indicator_catalog`** - KPI definitions
    - Pre-seeded with accident indicators (ACC-001 to ACC-006)
    - Fields: `indicator_code`, `indicator_name`, `definition`, `unit_name`, `preferred_chart`
    - **Used by**: Analyst agent to select relevant KPIs
+
+### Layer 2b: Vector Embeddings (`011_pgvector.sql`) 🆕
+
+**Purpose**: Native vector search inside PostgreSQL (replaces ChromaDB)
+
+#### Tables:
+1. **`document_embeddings`** - Chunk text + 3072-dim vector embeddings
+   - Fields: `id` (MD5 hash of `source::chunk_index`), `collection`, `document`, `embedding` (vector(3072)), `source`, `title`, `topic`, `chunk_index`, `total_chunks`, `page_ref`, `section_label`, `total_pages`, `created_at`
+   - **Embedding Model**: Google Gemini `gemini-embedding-001` (3072-dim, API-based — no local model download)
+   - **SDK**: `google-genai` v1.65.0 — `from google import genai`
+   - **Vector Index**: None (pgvector HNSW/IVFFlat max 2000-dim; exact cosine search used via sequential scan — sufficient for <50K chunks)
+   - **Search operator**: `<=>` cosine distance (`ORDER BY embedding <=> query_vec`)
+   - **Upsert**: `ON CONFLICT (id) DO UPDATE` — safe to re-ingest
+   - **View in DBeaver/pgAdmin**: Same connection as all other tables — no separate tool needed
+   - **Current row count**: 6 chunks (4 documents from MinIO)
 
 ---
 
@@ -355,8 +370,8 @@ ORDER BY hour_of_day;
 - `/api/test/query` - Execute read-only SQL (SELECT/WITH only)
 
 ### 3. **Health Check** (`GET /api/health`)
-- **Checks**: PostgreSQL connection, MinIO, ChromaDB
-- **Returns**: `{"status": "ok", "database": "connected", ...}`
+- **Checks**: PostgreSQL connection, MinIO, pgvector
+- **Returns**: `{"status": "ok", "services": {"postgres": "ok", "minio": "ok", "pgvector": "ok"}}`
 
 ---
 
@@ -374,10 +389,18 @@ ORDER BY hour_of_day;
 - **Strategy**: Materialized aggregates (not views)
 - **Reason**: Fast query performance for agent tools
 
+### Vector Embeddings (`document_embeddings`)
+- **Storage**: PostgreSQL `vector(768)` column (pgvector)
+- **Index**: HNSW for approximate nearest-neighbor (ANN) search — fast at scale
+- **Similarity**: Cosine distance via `<=>` operator
+- **Upsert**: `ON CONFLICT DO UPDATE` — idempotent re-ingestion
+- **Advantage**: Single platform — view in DBeaver/pgAdmin alongside all other tables
+
 ### Indexes Strategy
 - **Time-based**: `(year_no, month_no)` for time-series
 - **Geographic**: `province_name`, `geography_id` for location queries
 - **Scoring**: `hotspot_score DESC` for top-N queries
+- **Vector**: HNSW cosine on `document_embeddings.embedding`
 - **Foreign Keys**: All FK columns indexed automatically
 
 ---
@@ -391,12 +414,22 @@ DB_PORT: int = 5432
 DB_NAME: str = "chat-aio"
 DB_USER: str = "postgres"
 DB_PASSWORD: str = "1234"
+
+# pgvector / RAG
+PGVECTOR_COLLECTION: str = "musya_documents"
+EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 ```
 
 ### Connection String
 ```
 postgresql://postgres:1234@localhost:5432/chat-aio
 ```
+
+### Docker Image (PostgreSQL + pgvector)
+```yaml
+image: pgvector/pgvector:pg16   # Official pgvector image
+```
+> ⚠️ Plain `postgres:16` does NOT include pgvector — must use `pgvector/pgvector:pg16`
 
 ---
 
@@ -411,6 +444,10 @@ postgresql://postgres:1234@localhost:5432/chat-aio
 | 005 | Road enhancement | Add `road_code`, `geography_id`, `km_marker` to `dim_road_segment` |
 | 006 | Province marts | Add `mart_province_year`, `mart_province_road` |
 | 007 | All years support | Add `serious_injured`, `csv_year`, province views |
+| 008 | Duplicate prevention | UNIQUE constraints on fact tables |
+| 009 | Coordinates | Add `latitude`, `longitude` to `fact_accident_event` |
+| 010 | Evidence & Citations | `evidence_registry`, `claim_evidence_link` |
+| **011** | **pgvector 🆕** | **`CREATE EXTENSION vector` + `document_embeddings` table with HNSW index** |
 
 ---
 
@@ -424,11 +461,12 @@ postgresql://postgres:1234@localhost:5432/chat-aio
 5. **Handle empty results** - Return error JSON, not exceptions
 
 ### For Database Administrators:
-1. **Run migrations in order** - 001 → 002 → 003 → ... → 007
-2. **Rebuild marts after CSV import** - Use `import_csv_all_years.py`
-3. **Monitor connection pools** - Check pool exhaustion in logs
-4. **Vacuum regularly** - `VACUUM ANALYZE` on fact tables monthly
-5. **Backup before migrations** - `pg_dump chat-aio > backup.sql`
+1. **Run migrations in order** - 001 → 002 → 003 → ... → 011
+2. **Use correct Docker image** - `pgvector/pgvector:pg16` (not plain `postgres:16`)
+3. **Rebuild marts after CSV import** - Use `import_csv_all_years.py`
+4. **Monitor connection pools** - Check pool exhaustion in logs
+5. **Vacuum regularly** - `VACUUM ANALYZE` on fact tables monthly
+6. **Backup before migrations** - `pg_dump chat-aio > backup.sql`
 
 ### For Performance Optimization:
 1. **Use EXPLAIN ANALYZE** - Profile slow queries
@@ -477,6 +515,7 @@ Solution: Check CSV encoding (UTF-8), verify column count matches expected schem
 4. **Query Caching** - Redis cache for common aggregations
 5. **Time-Series DB** - Consider TimescaleDB extension for time-series data
 6. **Full-Text Search** - Add `tsvector` columns for text search in documents
+7. **pgvector IVFFlat** - Switch from HNSW to IVFFlat for very large embedding sets (>1M rows)
 
 ---
 
@@ -484,6 +523,9 @@ Solution: Check CSV encoding (UTF-8), verify column count matches expected schem
 
 - **API Routes**: See `src/routers/chat.py`, `src/routers/test_ui.py`
 - **Agent Tools**: See `src/tools/chart_builder.py`, `src/tools/accident.py`
-- **Database Migrations**: See `database/001_*.sql` through `database/007_*.sql`
+- **Database Migrations**: See `database/001_*.sql` through `database/011_pgvector.sql`
+- **Vector Store**: See `src/rag/vector_store.py` (pgvector implementation)
+- **RAG Pipeline**: See `src/rag/document_rag.py` (MinIO → pgvector ingestion)
 - **Data Import**: See `database/import_csv_all_years.py`
 - **Schema Analysis**: See `database/analyze_schema.py`, `database/verify_province_data.py`
+- **Full DB Reference**: See `doc/DATABASE_API_REFERENCE.md`

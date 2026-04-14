@@ -2,7 +2,7 @@
 
 > **Version**: 0.1.0  
 > **Last Updated**: 2026-04-13  
-> **Stack**: Python 3.12 · FastAPI · CrewAI · PostgreSQL · ChromaDB · MinIO · Google Gemini
+> **Stack**: Python 3.12 · FastAPI · CrewAI · PostgreSQL · pgvector · MinIO · Google Gemini
 
 ---
 
@@ -12,7 +12,7 @@
 
 ### Key Features
 - **Multi-Agent Pipeline**: 6 agents ทำงานแบบ sequential ด้วย CrewAI
-- **Dual RAG**: Document RAG (ChromaDB) + Database RAG (PostgreSQL)
+- **Dual RAG**: Document RAG (pgvector — PostgreSQL native) + Database RAG (PostgreSQL)
 - **SQL Specialist**: เขียนและรัน custom SQL query ได้อัตโนมัติ
 - **Chart Builder**: สร้าง Chart.js-compatible JSON สำหรับ frontend
 - **Thai-Language Reports**: รายงานภาษาไทยในรูปแบบ Markdown
@@ -40,7 +40,7 @@
 │  └──────────┘  └──────────┘  └─────────┘  └─────────┘  │
 │                                                          │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐   │
-│  │PostgreSQL│  │ ChromaDB │  │       MinIO          │   │
+│  │PostgreSQL│  │ pgvector │  │       MinIO          │   │
 │  │(data)    │  │(vectors) │  │   (documents)        │   │
 │  └──────────┘  └──────────┘  └──────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
@@ -85,7 +85,7 @@ Agent/
 │   │   └── sql_tools.py        # execute_custom_sql, explain_schema, get_table_row_count
 │   ├── routers/                # FastAPI route handlers
 │   │   ├── chat.py             # POST /api/chat, POST /api/chat/stream (SSE)
-│   │   ├── health.py           # GET /api/health (PostgreSQL + MinIO + ChromaDB)
+│   │   ├── health.py           # GET /api/health (PostgreSQL + MinIO + pgvector)
 │   │   ├── ingest.py           # POST /api/ingest (document ingestion)
 │   │   └── test_ui.py          # Test UI routes
 │   ├── schemas/                # Pydantic request/response models
@@ -93,7 +93,7 @@ Agent/
 │   │   └── response.py         # AgentResponse, ChartSpec, TableSpec, Citation
 │   ├── rag/                    # RAG (Retrieval-Augmented Generation) layer
 │   │   ├── document_rag.py     # PDF/DOCX extraction, chunking, ingestion, search
-│   │   ├── vector_store.py     # ChromaDB client, add/search documents
+│   │   ├── vector_store.py     # pgvector client (psycopg2 + Gemini embeddings), add/search documents
 │   │   └── database_rag.py     # PostgreSQL query helpers
 │   └── db/                     # Database connectivity
 │       ├── pool.py             # Async (asyncpg) + Sync (psycopg2) connection pools
@@ -110,7 +110,7 @@ Agent/
 ├── tests/                      # Pytest test suite
 ├── static/                     # Static files (test UI HTML)
 ├── pyproject.toml              # Project metadata + dependencies
-├── docker-compose.yml          # PostgreSQL + MinIO + ChromaDB
+├── docker-compose.yml          # PostgreSQL (pgvector/pgvector:pg16) + MinIO
 ├── Dockerfile                  # Agent server container
 └── .env                        # Environment variables
 ```
@@ -127,7 +127,7 @@ Agent/
 ### 4.2 Data Retrieval Specialist
 - **Role**: ค้นหาข้อมูลจาก Document RAG และ Database RAG
 - **Tools** (10 tools):
-  - `search_documents` — ค้นเอกสารจาก ChromaDB
+  - `search_documents` — ค้นเอกสารจาก pgvector (`document_embeddings`)
   - `get_indicator_catalog` — ตัวชี้วัดสุขภาพ
   - `get_geography_profile` — ข้อมูลพื้นที่
   - `get_province_year_summary` — สรุปอุบัติเหตุรายจังหวัดรายปี
@@ -172,10 +172,10 @@ Agent/
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/` | Root — API info + links |
-| `GET` | `/api/health` | Health check (PostgreSQL + MinIO + ChromaDB) |
+| `GET` | `/api/health` | Health check (PostgreSQL + MinIO + pgvector) |
 | `POST` | `/api/chat` | Process chat message through agent pipeline → `AgentResponse` |
 | `POST` | `/api/chat/stream` | SSE stream version of chat |
-| `POST` | `/api/ingest` | Ingest documents from MinIO → ChromaDB |
+| `POST` | `/api/ingest` | Ingest documents from MinIO → pgvector (`document_embeddings`) |
 | `GET` | `/test` | Standalone test UI |
 | `GET` | `/docs` | FastAPI auto-generated Swagger docs |
 
@@ -251,7 +251,7 @@ Agent/
 |---------|---------|-------------------|
 | **PostgreSQL** | Relational DB (facts, dims, marts) | `localhost:5432 / chat-aio` |
 | **MinIO** | Object storage (PDF, DOCX uploads) | `localhost:9000` |
-| **ChromaDB** | Vector store (document embeddings) | `./chroma_data` (local persistent) |
+| **pgvector** | Vector store (document embeddings) | PostgreSQL `chat-aio` — table `document_embeddings` |
 | **Google Gemini** | LLM via litellm (`gemini/gemini-2.0-flash`) | API key required |
 
 ### Connection Pools
@@ -278,7 +278,8 @@ Agent/
 | `MINIO_BUCKET` | `uploads` | MinIO bucket |
 | `GEMINI_API_KEY` | — | Google Gemini API key (**required**) |
 | `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model name |
-| `CHROMA_PERSIST_DIR` | `./chroma_data` | ChromaDB storage path |
+| `PGVECTOR_COLLECTION` | `musya_documents` | pgvector collection name |
+| `EMBEDDING_MODEL` | `models/gemini-embedding-001` | Gemini embedding model (3072-dim) |
 | `HOST` | `0.0.0.0` | Server bind host |
 | `PORT` | `8000` | Server port |
 | `CORS_ORIGINS` | `http://localhost:3000,...` | Allowed CORS origins |
@@ -356,9 +357,10 @@ pytest tests/ -v
 | `uvicorn[standard]` | >=0.30 | ASGI server |
 | `asyncpg` | >=0.29 | Async PostgreSQL driver |
 | `psycopg2-binary` | >=2.9 | Sync PostgreSQL driver |
-| `chromadb` | >=0.5 | Vector store |
+| `pgvector` | >=0.3 | pgvector Python adapter |
+| `psycopg2-binary` | >=2.9 | Sync PostgreSQL driver (also used by vector_store) |
 | `minio` | >=7.2 | Object storage client |
-| `google-genai` | >=1.0 | Gemini API (non-deprecated) |
+| `google-genai` | >=1.0 | Gemini API — LLM + embedding (non-deprecated) |
 | `langchain-google-genai` | >=2.0 | LangChain Gemini integration |
 | `langchain-text-splitters` | >=0.3 | Text chunking |
 | `PyMuPDF` | >=1.24 | PDF text extraction |

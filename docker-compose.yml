@@ -21,8 +21,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: uploads
       MINIO_USE_SSL: "false"
-      CHROMA_PERSIST_DIR: /app/chroma_data
-      CHROMA_COLLECTION: musya_documents
+      PGVECTOR_COLLECTION: musya_documents
       HOST: "0.0.0.0"
       PORT: "8000"
       CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
@@ -30,14 +29,12 @@ services:
       - .env
     ports:
       - "8000:8000"
-    volumes:
-      - chroma_data:/app/chroma_data
     networks:
       - chatv1_net
 
   # Reuse ChatV1 infrastructure
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: chatv1_postgres
     restart: unless-stopped
     environment:
@@ -83,8 +80,6 @@ volumes:
     name: chatv1_pgdata
   minio_data:
     name: chatv1_minio_data
-  chroma_data:
-    name: musya_chroma_data
 
 networks:
   chatv1_net:

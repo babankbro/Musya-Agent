@@ -11,6 +11,9 @@ from src.config import get_settings
 from src.agents.request_interpreter import create_request_interpreter, REQUEST_INTERPRETER_PROMPT
 from src.agents.retrieval import create_retrieval_agent
 from src.agents.sql_specialist import create_sql_specialist
+from src.agents.citation_evidence import (
+    create_citation_evidence_agent, CITATION_EVIDENCE_PROMPT, parse_evidence_context,
+)
 from src.agents.analyst_accident import create_accident_analyst, ACCIDENT_ANALYSIS_PROMPT
 from src.agents.report_writer import create_report_writer, REPORT_WRITER_PROMPT
 from src.agents.chart_builder import create_chart_builder, CHART_BUILDER_PROMPT
@@ -67,12 +70,13 @@ def _task_callback(task_output) -> None:
 
 
 def build_crew() -> dict:
-    """Build the Phase 1 crew with 6 core agents."""
+    """Build the crew with 7 core agents (includes Citation & Evidence)."""
     llm = _get_llm()
 
     interpreter = create_request_interpreter(llm)
     retriever = create_retrieval_agent(llm)
     sql_specialist = create_sql_specialist(llm)
+    citation_evidence = create_citation_evidence_agent(llm)
     analyst = create_accident_analyst(llm)
     chart_builder = create_chart_builder(llm)
     writer = create_report_writer(llm)
@@ -81,6 +85,7 @@ def build_crew() -> dict:
         "interpreter": interpreter,
         "retriever": retriever,
         "sql_specialist": sql_specialist,
+        "citation_evidence": citation_evidence,
         "analyst": analyst,
         "chart_builder": chart_builder,
         "writer": writer,
@@ -149,15 +154,26 @@ def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
         context=[retrieve_task],
     )
 
-    # --- Task 4: Analyze ---
+    # --- Task 4: Citation & Evidence ---
+    citation_task = Task(
+        description=CITATION_EVIDENCE_PROMPT,
+        expected_output=(
+            "JSON object with evidence_items, claims, citations, source_notes, coverage "
+            "— ดูรายละเอียด format ใน prompt"
+        ),
+        agent=agents["citation_evidence"],
+        context=[retrieve_task, sql_task],
+    )
+
+    # --- Task 5: Analyze ---
     analyze_task = Task(
         description=ACCIDENT_ANALYSIS_PROMPT,
         expected_output="ผลการวิเคราะห์ข้อมูลอุบัติเหตุ รวมถึง key_findings, trends, risk_areas, recommended_actions",
         agent=agents["analyst"],
-        context=[retrieve_task, sql_task],
+        context=[retrieve_task, sql_task, citation_task],
     )
 
-    # --- Task 5: Build charts ---
+    # --- Task 6: Build charts ---
     chart_build_task = Task(
         description=CHART_BUILDER_PROMPT,
         expected_output=(
@@ -165,25 +181,25 @@ def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
             "แต่ละ item มี fields: type, title, data.labels, data.datasets, options, source_note"
         ),
         agent=agents["chart_builder"],
-        context=[retrieve_task, sql_task, analyze_task],
+        context=[retrieve_task, sql_task, analyze_task, citation_task],
     )
 
-    # --- Task 6: Write report ---
+    # --- Task 7: Write report ---
     write_task = Task(
         description=REPORT_WRITER_PROMPT,
         expected_output=(
             "รายงานภาษาไทยในรูปแบบ Markdown ที่มีโครงสร้างชัดเจน "
-            "พร้อมข้อเสนอกราฟและตาราง "
+            "พร้อม inline citation [C-001] และ reference list ท้ายรายงาน "
             "รวมถึงข้อเสนอคำถามติดตาม 3 ข้อ"
         ),
         agent=agents["writer"],
-        context=[analyze_task, chart_build_task],
+        context=[analyze_task, chart_build_task, citation_task],
     )
 
     # --- Build and run Crew ---
     crew = Crew(
         agents=list(agents.values()),
-        tasks=[interpret_task, retrieve_task, sql_task, analyze_task, chart_build_task, write_task],
+        tasks=[interpret_task, retrieve_task, sql_task, citation_task, analyze_task, chart_build_task, write_task],
         process=Process.sequential,
         verbose=True,
         step_callback=_step_callback,
@@ -192,7 +208,7 @@ def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
 
     sep = "★" * 60
     logger.info(
-        "\n%s\n🚀 [CREW START] message: %s\n   agents: Request Interpreter → Retrieval → SQL Specialist → Analyst → Chart Builder → Report Writer\n%s",
+        "\n%s\n🚀 [CREW START] message: %s\n   agents: Request Interpreter → Retrieval → SQL → Citation & Evidence → Analyst → Chart Builder → Report Writer\n%s",
         sep, user_message[:120], sep
     )
 
@@ -218,35 +234,63 @@ def _parse_crew_result(result, elapsed: float) -> AgentResponse:
     """Parse CrewAI result into a structured AgentResponse."""
     raw_output = str(result)
 
-    # Try to extract charts from the tasks_output list (index 3 = chart_build_task)
+    # Extract charts from chart_build_task output (now index 5)
     charts = _extract_charts_from_result(result)
     follow_ups = _extract_follow_ups(raw_output)
+
+    # Extract citations from Citation & Evidence Agent output (task index 3)
+    citations = []
+    evidence_summary = {}
+    tasks_output = getattr(result, "tasks_output", None)
+    if tasks_output and len(tasks_output) >= 4:
+        citation_raw = getattr(tasks_output[3], "raw", None) or str(tasks_output[3])
+        try:
+            ev_ctx = parse_evidence_context(citation_raw)
+            citations = [
+                Citation(
+                    citation_code=c.citation_code,
+                    source_type=c.source_type,
+                    source_ref=c.source_ref,
+                    citation_text=c.citation_text,
+                )
+                for c in ev_ctx.citations
+            ]
+            evidence_summary = {
+                "total_evidence": len(ev_ctx.evidence_items),
+                "total_citations": len(ev_ctx.citations),
+                "total_claims": len(ev_ctx.claims),
+                "coverage_score": ev_ctx.coverage_report.coverage_score,
+            }
+        except Exception as e:
+            logger.warning("Failed to parse citation output: %s", e)
 
     return AgentResponse(
         content=raw_output,
         topic="accident",
         charts=charts,
         tables=[],
-        citations=[],
+        citations=citations,
         follow_ups=follow_ups,
         metadata={
             "elapsed_seconds": elapsed,
-            "agent_count": 6,
-            "pipeline": "phase1_accident_with_sql",
+            "agent_count": 7,
+            "pipeline": "phase2_with_citation_evidence",
             "chart_count": len(charts),
+            "citation_count": len(citations),
+            **evidence_summary,
         },
     )
 
 
 def _extract_charts_from_result(result) -> list[ChartSpec]:
-    """Extract ChartSpec objects from the chart_build_task output (task index 4)."""
+    """Extract ChartSpec objects from the chart_build_task output (task index 5)."""
     # CrewAI stores per-task outputs in result.tasks_output list
     tasks_output = getattr(result, "tasks_output", None)
     chart_raw = None
 
-    if tasks_output and len(tasks_output) >= 5:
-        # Index 4 = chart_build_task (after interpret, retrieve, sql, analyze)
-        chart_task_out = tasks_output[4]
+    if tasks_output and len(tasks_output) >= 6:
+        # Index 5 = chart_build_task (after interpret, retrieve, sql, citation, analyze)
+        chart_task_out = tasks_output[5]
         chart_raw = getattr(chart_task_out, "raw", None) or str(chart_task_out)
     else:
         # Fallback: try to find a JSON array block anywhere in the full output

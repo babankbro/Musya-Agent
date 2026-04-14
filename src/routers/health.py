@@ -32,14 +32,17 @@ async def health_check():
         status["services"]["minio"] = f"error: {e}"
         status["status"] = "degraded"
 
-    # Check ChromaDB
+    # Check pgvector
     try:
-        from src.rag.vector_store import get_chroma_client
-        client = get_chroma_client()
-        client.heartbeat()
-        status["services"]["chromadb"] = "ok"
+        from src.rag.vector_store import health_check as pgvector_health
+        ok = pgvector_health()
+        if ok:
+            status["services"]["pgvector"] = "ok"
+        else:
+            status["services"]["pgvector"] = "error: connection failed"
+            status["status"] = "degraded"
     except Exception as e:
-        status["services"]["chromadb"] = f"error: {e}"
+        status["services"]["pgvector"] = f"error: {e}"
         status["status"] = "degraded"
 
     return status

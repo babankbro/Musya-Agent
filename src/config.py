@@ -22,9 +22,16 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
 
-    # ChromaDB
-    CHROMA_PERSIST_DIR: str = "./chroma_data"
-    CHROMA_COLLECTION: str = "musya_documents"
+    # pgvector (PostgreSQL-native vector search — replaces ChromaDB)
+    PGVECTOR_COLLECTION: str = "musya_documents"
+    EMBEDDING_MODEL: str = "models/gemini-embedding-001"  # Google Gemini embedding API (768-dim)
+
+    # Document Upload
+    MAX_UPLOAD_SIZE_MB: int = 50
+    ALLOWED_FILE_TYPES: str = ".pdf,.docx,.txt,.md"
+    AUTO_INGEST_ON_UPLOAD: bool = True
+    ALLOW_EXTERNAL_URL_IMPORT: bool = True
+    EXTERNAL_URL_TIMEOUT: int = 30
 
     # Server
     HOST: str = "0.0.0.0"
@@ -50,7 +57,7 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 @lru_cache

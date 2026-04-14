@@ -16,17 +16,10 @@ CREATE TABLE IF NOT EXISTS document_registry (
 CREATE INDEX IF NOT EXISTS idx_doc_topic ON document_registry(topic);
 
 -- Document chunks for RAG (metadata mirror of ChromaDB)
-CREATE TABLE IF NOT EXISTS document_chunks (
-    chunk_id BIGSERIAL PRIMARY KEY,
-    document_id BIGINT REFERENCES document_registry(document_id),
-    chunk_order INT,
-    chunk_text TEXT,
-    keywords TEXT,
-    embedding_ref VARCHAR(255),
-    page_ref VARCHAR(50)
-);
-
-CREATE INDEX IF NOT EXISTS idx_chunk_doc ON document_chunks(document_id);
+-- REMOVED by migration 014: ChromaDB replaced by pgvector (migration 011).
+-- Chunk text + vectors are now stored in document_embeddings.
+-- CREATE TABLE statement kept here for history only — table is DROPPED by 014.
+-- CREATE TABLE IF NOT EXISTS document_chunks ( ... )
 
 -- Indicator catalog
 CREATE TABLE IF NOT EXISTS indicator_catalog (
