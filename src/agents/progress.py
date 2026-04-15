@@ -36,7 +36,9 @@ CHAT_PIPELINE_AGENTS = [
     {"name": "Citation & Evidence", "icon": "📚", "order": 4},
     {"name": "Accident Analyst", "icon": "📊", "order": 5},
     {"name": "Chart Builder", "icon": "📈", "order": 6},
-    {"name": "Report Writer", "icon": "✍️", "order": 7},
+    {"name": "Research Synthesizer", "icon": "🔬", "order": 7},
+    {"name": "Deep Analyst", "icon": "🧠", "order": 8},
+    {"name": "Report Composer", "icon": "✍️", "order": 9},
 ]
 
 POLICY_PIPELINE_AGENTS = [
