@@ -9,7 +9,7 @@ import re
 import time
 from datetime import datetime
 
-from crewai import Agent, Crew, Task, Process
+from crewai import Agent, Crew, Task, Process, LLM
 
 from src.config import get_settings
 from src.tools.notebooklm import PROVINCE_NOTEBOOKS, SUPPORTED_PROVINCES
@@ -35,9 +35,24 @@ POLICY_AGENT_NAMES = FOUNDATION_AGENT_NAMES + [
 ]
 
 
-def _get_llm() -> str:
+def _get_llm(tier: str = "fast") -> LLM:
+    """Get a tiered LLM instance for CrewAI agents.
+
+    Args:
+        tier: "fast" for foundation/simple agents, "pro" for analyst/writer agents.
+    """
     s = get_settings()
-    return f"gemini/{s.GEMINI_MODEL}"
+    if tier == "pro":
+        return LLM(
+            model=f"gemini/{s.GEMINI_MODEL_PRO}",
+            temperature=0.3,
+            max_tokens=s.REPORT_MAX_TOKENS,
+        )
+    return LLM(
+        model=f"gemini/{s.GEMINI_MODEL}",
+        temperature=0.2,
+        max_tokens=4096,
+    )
 
 
 def validate_province(province: str) -> tuple[bool, str]:
@@ -83,18 +98,19 @@ def run_policy_brief(
     if not topics:
         topics = ["rti", "mental", "ncd"]
 
-    llm = _get_llm()
+    llm_fast = _get_llm("fast")
+    llm_pro = _get_llm("pro")
 
-    # --- Build shared foundation agents (1-4) with NLM enabled ---
+    # --- Build shared foundation agents (1-4) with NLM enabled — fast tier ---
     foundation_agents = build_foundation_agents(
-        llm, include_nlm=True, province=province, notebook_id=notebook_id,
+        llm_fast, include_nlm=True, province=province, notebook_id=notebook_id,
     )
 
-    # Policy-specific agents
-    rti_analyst = create_rti_policy_analyst(llm)
-    mental_analyst = create_mental_health_analyst(llm)
-    ncd_analyst = create_ncd_policy_analyst(llm)
-    report_writer = create_policy_report_writer(llm)
+    # Policy-specific agents — pro tier for quality output
+    rti_analyst = create_rti_policy_analyst(llm_pro)
+    mental_analyst = create_mental_health_analyst(llm_pro)
+    ncd_analyst = create_ncd_policy_analyst(llm_pro)
+    report_writer = create_policy_report_writer(llm_pro)
 
     # --- Tasks 1-4: Shared Foundation (with NLM) ---
     user_message = f"สร้างรายงานตรวจราชการ จังหวัด{province} ปี {year} หัวข้อ: {', '.join(topics)}"
@@ -369,18 +385,19 @@ def run_policy_brief_with_progress(
     if not topics:
         topics = ["rti", "mental", "ncd"]
 
-    llm = _get_llm()
+    llm_fast = _get_llm("fast")
+    llm_pro = _get_llm("pro")
 
-    # --- Build shared foundation agents (1-4) with NLM enabled ---
+    # --- Build shared foundation agents (1-4) with NLM enabled — fast tier ---
     foundation_agents = build_foundation_agents(
-        llm, include_nlm=True, province=province, notebook_id=notebook_id,
+        llm_fast, include_nlm=True, province=province, notebook_id=notebook_id,
     )
 
-    # Policy-specific agents
-    rti_analyst = create_rti_policy_analyst(llm)
-    mental_analyst = create_mental_health_analyst(llm)
-    ncd_analyst = create_ncd_policy_analyst(llm)
-    report_writer = create_policy_report_writer(llm)
+    # Policy-specific agents — pro tier for quality output
+    rti_analyst = create_rti_policy_analyst(llm_pro)
+    mental_analyst = create_mental_health_analyst(llm_pro)
+    ncd_analyst = create_ncd_policy_analyst(llm_pro)
+    report_writer = create_policy_report_writer(llm_pro)
 
     # Emit initial progress
     emit_progress(request_id, FOUNDATION_AGENT_NAMES[0], "running", f"กำลังตีความคำขอ {province}...")

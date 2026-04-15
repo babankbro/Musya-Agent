@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # Google Gemini
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL_PRO: str = "gemini-2.5-pro"
+    REPORT_MAX_TOKENS: int = 8192
 
     # pgvector (PostgreSQL-native vector search — replaces ChromaDB)
     PGVECTOR_COLLECTION: str = "musya_documents"

@@ -4,7 +4,7 @@ import logging
 import re
 import sys
 import time
-from crewai import Agent, Crew, Task, Process
+from crewai import Agent, Crew, Task, Process, LLM
 from crewai.agents.parser import AgentAction, AgentFinish
 
 from src.config import get_settings
@@ -13,6 +13,8 @@ from src.agents.shared_foundation import (
 )
 from src.agents.citation_evidence import parse_evidence_context
 from src.agents.analyst_accident import create_accident_analyst, ACCIDENT_ANALYSIS_PROMPT
+from src.agents.research_synthesizer import create_research_synthesizer, RESEARCH_SYNTHESIZER_PROMPT
+from src.agents.deep_analyst import create_deep_analyst, DEEP_ANALYST_PROMPT
 from src.agents.report_writer import create_report_writer, REPORT_WRITER_PROMPT
 from src.agents.chart_builder import create_chart_builder, CHART_BUILDER_PROMPT
 from src.schemas.response import AgentResponse, ChartSpec, TableSpec, Citation
@@ -20,19 +22,38 @@ from src.agents.progress import emit_progress
 
 logger = logging.getLogger(__name__)
 
-# Agent names for progress tracking (foundation + chat-specific)
+# Agent names for progress tracking (foundation + chat-specific, 9 agents total)
 CHAT_AGENT_NAMES = FOUNDATION_AGENT_NAMES + [
     "Accident Analyst",
     "Chart Builder",
-    "Report Writer",
+    "Research Synthesizer",
+    "Deep Analyst",
+    "Report Composer",
 ]
 
 
-def _get_llm():
-    """Get the LLM instance for CrewAI agents."""
+def _get_llm(tier: str = "fast") -> LLM:
+    """Get a tiered LLM instance for CrewAI agents.
+
+    Args:
+        tier: "fast" for foundation/simple agents, "pro" for analyst/writer agents.
+
+    Returns:
+        CrewAI LLM object configured for the requested tier.
+    """
     s = get_settings()
-    # CrewAI supports litellm format: "gemini/model-name"
-    return f"gemini/{s.GEMINI_MODEL}"
+    if tier == "pro":
+        return LLM(
+            model=f"gemini/{s.GEMINI_MODEL_PRO}",
+            temperature=0.3,
+            max_tokens=s.REPORT_MAX_TOKENS,
+        )
+    # Default: fast tier
+    return LLM(
+        model=f"gemini/{s.GEMINI_MODEL}",
+        temperature=0.2,
+        max_tokens=4096,
+    )
 
 
 def _step_callback(step_output) -> None:
@@ -76,21 +97,34 @@ def _task_callback(task_output) -> None:
 
 
 def build_crew() -> dict:
-    """Build the crew with 7 core agents: 4 shared foundation + 3 chat-specific."""
-    llm = _get_llm()
+    """Build the crew with 9 core agents: 4 shared foundation + 5 chat-specific.
 
-    # Shared foundation agents (1-4)
-    foundation = build_foundation_agents(llm, include_nlm=False)
+    Pipeline: Interpreter → Retrieval → SQL → Citation →
+              Analyst → Chart Builder → Research Synthesizer → Deep Analyst → Report Composer
 
-    # Chat-specific agents (5-7)
-    analyst = create_accident_analyst(llm)
-    chart_builder = create_chart_builder(llm)
-    writer = create_report_writer(llm)
+    Uses tiered LLMs:
+    - fast tier: foundation agents (interpreter, retriever, sql, citation)
+    - pro tier: analyst, chart builder, synthesizer, deep analyst, report composer
+    """
+    llm_fast = _get_llm("fast")
+    llm_pro = _get_llm("pro")
+
+    # Shared foundation agents (1-4) — fast tier
+    foundation = build_foundation_agents(llm_fast, include_nlm=False)
+
+    # Chat-specific agents (5-9) — pro tier for quality
+    analyst = create_accident_analyst(llm_pro)
+    chart_builder = create_chart_builder(llm_pro)
+    synthesizer = create_research_synthesizer(llm_pro)
+    deep_analyst = create_deep_analyst(llm_pro)
+    writer = create_report_writer(llm_pro)
 
     return {
         **foundation,
         "analyst": analyst,
         "chart_builder": chart_builder,
+        "synthesizer": synthesizer,
+        "deep_analyst": deep_analyst,
         "writer": writer,
     }
 
@@ -118,7 +152,11 @@ def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
     # --- Task 5: Analyze ---
     analyze_task = Task(
         description=ACCIDENT_ANALYSIS_PROMPT,
-        expected_output="ผลการวิเคราะห์ข้อมูลอุบัติเหตุ รวมถึง key_findings, trends, risk_areas, recommended_actions",
+        expected_output=(
+            "ผลการวิเคราะห์ข้อมูลอุบัติเหตุเชิงลึก รวมถึง key_findings (5+ ข้อพร้อมบริบท), "
+            "trends (รายปีพร้อมอธิบายสาเหตุ), risk_areas, risk_groups, Haddon Matrix, "
+            "recommended_actions (แบ่ง 3 ระยะพร้อม KPI), chart_candidates, ข้อจำกัดข้อมูล"
+        ),
         agent=agents["analyst"],
         context=[retrieve_task, sql_task, citation_task],
     )
@@ -134,22 +172,51 @@ def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
         context=[retrieve_task, sql_task, analyze_task, citation_task],
     )
 
-    # --- Task 7: Write report ---
+    # --- Task 7: Research Synthesizer (NEW) ---
+    research_synth_task = Task(
+        description=RESEARCH_SYNTHESIZER_PROMPT,
+        expected_output=(
+            "4 บล็อกย่อหน้าเชิงบรรยาย รวม 1,200–2,000 คำ: "
+            "Block 1 สถานการณ์ภาพรวม, Block 2 กลุ่มเสี่ยงและปัจจัย, "
+            "Block 3 ผลดำเนินงานและ GAP, Block 4 บริบทเชิงพื้นที่รายอำเภอ"
+        ),
+        agent=agents["synthesizer"],
+        context=[retrieve_task, sql_task, analyze_task, citation_task],
+    )
+
+    # --- Task 8: Deep Analyst (NEW) ---
+    deep_analysis_task = Task(
+        description=DEEP_ANALYST_PROMPT,
+        expected_output=(
+            "การวิเคราะห์ 4 มิติ รวม 1,000–1,500 คำ: "
+            "Root Cause (Haddon Matrix เชิงลึก), การเปรียบเทียบเชิงพื้นที่, "
+            "ผลกระทบเชิงนโยบาย (Policy Gaps + ข้อเสนอ), การคาดการณ์แนวโน้ม"
+        ),
+        agent=agents["deep_analyst"],
+        context=[retrieve_task, sql_task, analyze_task, citation_task],
+    )
+
+    # --- Task 9: Write report (Report Composer) ---
     write_task = Task(
         description=REPORT_WRITER_PROMPT,
         expected_output=(
-            "รายงานภาษาไทยในรูปแบบ Markdown ที่มีโครงสร้างชัดเจน "
-            "พร้อม inline citation [C-001] และ reference list ท้ายรายงาน "
-            "รวมถึงข้อเสนอคำถามติดตาม 3 ข้อ"
+            "รายงานสุขภาพภาษาไทยในรูปแบบ Markdown ความยาว 2,000–4,000 คำ "
+            "ครอบคลุม 5 ส่วน: บทสรุปผู้บริหาร, สถานการณ์, มาตรการ, ผลดำเนินงาน, GAP "
+            "พร้อม inline citation [C-xxx] ทุกตัวเลขสำคัญ, ตาราง KPI, reference list APA 7th "
+            "และข้อเสนอคำถามติดตาม 3 ข้อ"
         ),
         agent=agents["writer"],
-        context=[analyze_task, chart_build_task, citation_task],
+        context=[research_synth_task, deep_analysis_task, chart_build_task, citation_task],
     )
 
     # --- Build and run Crew ---
     crew = Crew(
         agents=list(agents.values()),
-        tasks=[interpret_task, retrieve_task, sql_task, citation_task, analyze_task, chart_build_task, write_task],
+        tasks=[
+            interpret_task, retrieve_task, sql_task, citation_task,
+            analyze_task, chart_build_task,
+            research_synth_task, deep_analysis_task, write_task,
+        ],
         process=Process.sequential,
         verbose=True,
         step_callback=_step_callback,
@@ -158,7 +225,9 @@ def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
 
     sep = "★" * 60
     logger.info(
-        "\n%s\n🚀 [CREW START] message: %s\n   agents: Request Interpreter → Retrieval → SQL → Citation & Evidence → Analyst → Chart Builder → Report Writer\n%s",
+        "\n%s\n🚀 [CREW START] message: %s\n"
+        "   pipeline: Interpreter → Retrieval → SQL → Citation → "
+        "Analyst → Charts → Research Synthesizer → Deep Analyst → Report Composer\n%s",
         sep, user_message[:120], sep
     )
 
@@ -223,8 +292,8 @@ def _parse_crew_result(result, elapsed: float) -> AgentResponse:
         follow_ups=follow_ups,
         metadata={
             "elapsed_seconds": elapsed,
-            "agent_count": 7,
-            "pipeline": "phase2_with_citation_evidence",
+            "agent_count": 9,
+            "pipeline": "phase3_research_synthesizer_deep_analyst",
             "chart_count": len(charts),
             "citation_count": len(citations),
             **evidence_summary,
@@ -367,7 +436,11 @@ def run_chat_with_progress(
     # --- Task 5: Analyze ---
     analyze_task = Task(
         description=ACCIDENT_ANALYSIS_PROMPT,
-        expected_output="ผลการวิเคราะห์ข้อมูลอุบัติเหตุ รวมถึง key_findings, trends, risk_areas, recommended_actions",
+        expected_output=(
+            "ผลการวิเคราะห์ข้อมูลอุบัติเหตุเชิงลึก รวมถึง key_findings (5+ ข้อพร้อมบริบท), "
+            "trends (รายปีพร้อมอธิบายสาเหตุ), risk_areas, risk_groups, Haddon Matrix, "
+            "recommended_actions (แบ่ง 3 ระยะพร้อม KPI), chart_candidates, ข้อจำกัดข้อมูล"
+        ),
         agent=agents["analyst"],
         context=[retrieve_task, sql_task, citation_task],
     )
@@ -383,19 +456,48 @@ def run_chat_with_progress(
         context=[retrieve_task, sql_task, analyze_task, citation_task],
     )
 
-    # --- Task 7: Write report ---
+    # --- Task 7: Research Synthesizer (NEW) ---
+    research_synth_task = Task(
+        description=RESEARCH_SYNTHESIZER_PROMPT,
+        expected_output=(
+            "4 บล็อกย่อหน้าเชิงบรรยาย รวม 1,200–2,000 คำ: "
+            "Block 1 สถานการณ์ภาพรวม, Block 2 กลุ่มเสี่ยงและปัจจัย, "
+            "Block 3 ผลดำเนินงานและ GAP, Block 4 บริบทเชิงพื้นที่รายอำเภอ"
+        ),
+        agent=agents["synthesizer"],
+        context=[retrieve_task, sql_task, analyze_task, citation_task],
+    )
+
+    # --- Task 8: Deep Analyst (NEW) ---
+    deep_analysis_task = Task(
+        description=DEEP_ANALYST_PROMPT,
+        expected_output=(
+            "การวิเคราะห์ 4 มิติ รวม 1,000–1,500 คำ: "
+            "Root Cause (Haddon Matrix เชิงลึก), การเปรียบเทียบเชิงพื้นที่, "
+            "ผลกระทบเชิงนโยบาย (Policy Gaps + ข้อเสนอ), การคาดการณ์แนวโน้ม"
+        ),
+        agent=agents["deep_analyst"],
+        context=[retrieve_task, sql_task, analyze_task, citation_task],
+    )
+
+    # --- Task 9: Write report (Report Composer) ---
     write_task = Task(
         description=REPORT_WRITER_PROMPT,
         expected_output=(
-            "รายงานภาษาไทยในรูปแบบ Markdown ที่มีโครงสร้างชัดเจน "
-            "พร้อม inline citation [C-001] และ reference list ท้ายรายงาน "
-            "รวมถึงข้อเสนอคำถามติดตาม 3 ข้อ"
+            "รายงานสุขภาพภาษาไทยในรูปแบบ Markdown ความยาว 2,000–4,000 คำ "
+            "ครอบคลุม 5 ส่วน: บทสรุปผู้บริหาร, สถานการณ์, มาตรการ, ผลดำเนินงาน, GAP "
+            "พร้อม inline citation [C-xxx] ทุกตัวเลขสำคัญ, ตาราง KPI, reference list APA 7th "
+            "และข้อเสนอคำถามติดตาม 3 ข้อ"
         ),
         agent=agents["writer"],
-        context=[analyze_task, chart_build_task, citation_task],
+        context=[research_synth_task, deep_analysis_task, chart_build_task, citation_task],
     )
 
-    tasks = [interpret_task, retrieve_task, sql_task, citation_task, analyze_task, chart_build_task, write_task]
+    tasks = [
+        interpret_task, retrieve_task, sql_task, citation_task,
+        analyze_task, chart_build_task,
+        research_synth_task, deep_analysis_task, write_task,
+    ]
 
     # Custom task callback that emits progress
     current_task_idx = [0]  # Use list to allow mutation in closure
@@ -426,7 +528,9 @@ def run_chat_with_progress(
 
     sep = "★" * 60
     logger.info(
-        "\n%s\n🚀 [CREW+PROGRESS] message: %s\n%s",
+        "\n%s\n🚀 [CREW+PROGRESS] message: %s\n"
+        "   pipeline: Interpreter → Retrieval → SQL → Citation → "
+        "Analyst → Charts → Research Synthesizer → Deep Analyst → Report Composer\n%s",
         sep, user_message[:120], sep
     )
 
