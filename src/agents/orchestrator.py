@@ -8,18 +8,24 @@ from crewai import Agent, Crew, Task, Process
 from crewai.agents.parser import AgentAction, AgentFinish
 
 from src.config import get_settings
-from src.agents.request_interpreter import create_request_interpreter, REQUEST_INTERPRETER_PROMPT
-from src.agents.retrieval import create_retrieval_agent
-from src.agents.sql_specialist import create_sql_specialist
-from src.agents.citation_evidence import (
-    create_citation_evidence_agent, CITATION_EVIDENCE_PROMPT, parse_evidence_context,
+from src.agents.shared_foundation import (
+    build_foundation_agents, build_foundation_tasks, FOUNDATION_AGENT_NAMES,
 )
+from src.agents.citation_evidence import parse_evidence_context
 from src.agents.analyst_accident import create_accident_analyst, ACCIDENT_ANALYSIS_PROMPT
 from src.agents.report_writer import create_report_writer, REPORT_WRITER_PROMPT
 from src.agents.chart_builder import create_chart_builder, CHART_BUILDER_PROMPT
 from src.schemas.response import AgentResponse, ChartSpec, TableSpec, Citation
+from src.agents.progress import emit_progress
 
 logger = logging.getLogger(__name__)
+
+# Agent names for progress tracking (foundation + chat-specific)
+CHAT_AGENT_NAMES = FOUNDATION_AGENT_NAMES + [
+    "Accident Analyst",
+    "Chart Builder",
+    "Report Writer",
+]
 
 
 def _get_llm():
@@ -70,28 +76,23 @@ def _task_callback(task_output) -> None:
 
 
 def build_crew() -> dict:
-    """Build the crew with 7 core agents (includes Citation & Evidence)."""
+    """Build the crew with 7 core agents: 4 shared foundation + 3 chat-specific."""
     llm = _get_llm()
 
-    interpreter = create_request_interpreter(llm)
-    retriever = create_retrieval_agent(llm)
-    sql_specialist = create_sql_specialist(llm)
-    citation_evidence = create_citation_evidence_agent(llm)
+    # Shared foundation agents (1-4)
+    foundation = build_foundation_agents(llm, include_nlm=False)
+
+    # Chat-specific agents (5-7)
     analyst = create_accident_analyst(llm)
     chart_builder = create_chart_builder(llm)
     writer = create_report_writer(llm)
 
-    agents = {
-        "interpreter": interpreter,
-        "retriever": retriever,
-        "sql_specialist": sql_specialist,
-        "citation_evidence": citation_evidence,
+    return {
+        **foundation,
         "analyst": analyst,
         "chart_builder": chart_builder,
         "writer": writer,
     }
-
-    return agents
 
 
 def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
@@ -106,64 +107,13 @@ def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
     """
     start_time = time.time()
     agents = build_crew()
-    llm = _get_llm()
 
-    # --- Task 1: Interpret the request ---
-    interpret_desc = REQUEST_INTERPRETER_PROMPT.replace("{user_message}", user_message)
-    interpret_task = Task(
-        description=interpret_desc,
-        expected_output="JSON object with topics, geography, time_range, report_type, focus, language",
-        agent=agents["interpreter"],
-    )
-
-    # --- Task 2: Retrieve data ---
-    retrieve_task = Task(
-        description=(
-            "จากผลการตีความคำขอ ให้ค้นหาข้อมูลที่เกี่ยวข้องทั้งหมด:\n"
-            "1. ค้นเอกสารที่เกี่ยวข้องจาก Document RAG\n"
-            "2. ดึงข้อมูลสถิติจากฐานข้อมูล\n"
-            "3. ดึงตัวชี้วัดที่เกี่ยวข้อง\n"
-            "4. รวบรวมข้อมูลพื้นที่ถ้าจำเป็น\n\n"
-            "ให้ค้นข้อมูลให้ครบถ้วนและระบุแหล่งที่มาทุกรายการ\n\n"
-            "คำขอของผู้ใช้: " + user_message
-        ),
-        expected_output="รวบรวมข้อมูลทั้งหมดที่ค้นมาได้ พร้อมระบุแหล่งที่มา",
-        agent=agents["retriever"],
-        context=[interpret_task],
-    )
-
-    # --- Task 3: SQL Specialist (prepare chart-ready data) ---
-    sql_task = Task(
-        description=(
-            "วิเคราะห์คำขอและข้อมูลจาก retrieval agent แล้วดำเนินการดังนี้:\n\n"
-            "1. **ถ้าต้องการแสดงกราฟ/แผนภูมิ**:\n"
-            "   - เขียน SQL query เพื่อดึงข้อมูลในรูปแบบที่เหมาะสมกับการสร้างกราฟ\n"
-            "   - ข้อมูลต้องมี labels (แกน X) และ values (แกน Y) ที่ชัดเจน\n"
-            "   - ตัวอย่าง: SELECT year_no, accident_count, death_count FROM ... ORDER BY year_no\n"
-            "   - รัน query และจัดรูปแบบผลลัพธ์ให้พร้อมสำหรับ Chart Builder\n\n"
-            "2. **ถ้าต้องการข้อมูลเฉพาะเจาะจง** ที่ tools ปกติไม่มี:\n"
-            "   - เขียน SQL query ที่เหมาะสม (เช่น custom filtering, grouping, calculations)\n"
-            "   - รัน query และอธิบายผลลัพธ์\n\n"
-            "3. **ถ้าเป็นคำถามทั่วไป** ที่ไม่ต้องการกราฟและข้อมูลจาก retrieval เพียงพอ:\n"
-            "   - ตอบว่า 'ข้อมูลจาก retrieval เพียงพอแล้ว ไม่ต้องใช้ custom SQL'\n\n"
-            "**สำคัญ**: ถ้าคำขอเกี่ยวกับ trend, เปรียบเทียบ, สถิติรายปี/รายเดือน → ต้องเตรียมข้อมูลสำหรับกราฟเสมอ\n\n"
-            "คำขอของผู้ใช้: " + user_message
-        ),
-        expected_output="ข้อมูลในรูปแบบที่พร้อมสำหรับการสร้างกราฟ (ถ้าต้องการกราฟ) หรือผลลัพธ์ custom query หรือข้อความว่าไม่จำเป็น",
-        agent=agents["sql_specialist"],
-        context=[retrieve_task],
-    )
-
-    # --- Task 4: Citation & Evidence ---
-    citation_task = Task(
-        description=CITATION_EVIDENCE_PROMPT,
-        expected_output=(
-            "JSON object with evidence_items, claims, citations, source_notes, coverage "
-            "— ดูรายละเอียด format ใน prompt"
-        ),
-        agent=agents["citation_evidence"],
-        context=[retrieve_task, sql_task],
-    )
+    # --- Tasks 1-4: Shared Foundation ---
+    foundation = build_foundation_tasks(agents, user_message)
+    interpret_task = foundation["interpret"]
+    retrieve_task = foundation["retrieve"]
+    sql_task = foundation["sql"]
+    citation_task = foundation["citation"]
 
     # --- Task 5: Analyze ---
     analyze_task = Task(
@@ -375,3 +325,125 @@ def _extract_follow_ups(text: str) -> list[str]:
                 break
 
     return follow_ups[:3]
+
+
+def run_chat_with_progress(
+    user_message: str,
+    session_id: str | None = None,
+    request_id: str | None = None,
+) -> AgentResponse:
+    """Run the chat pipeline with progress tracking for streaming UI.
+
+    Emits progress events as each agent completes.
+    """
+    start_time = time.time()
+    agents = build_crew()
+
+    # Track task completion times
+    task_times = {}
+
+    def make_task_callback(agent_idx: int):
+        """Create a task callback that emits progress for a specific agent."""
+        agent_name = CHAT_AGENT_NAMES[agent_idx] if agent_idx < len(CHAT_AGENT_NAMES) else f"Agent {agent_idx}"
+
+        def callback(task_output):
+            elapsed = time.time() - start_time
+            task_times[agent_idx] = elapsed
+            emit_progress(request_id, agent_name, "done", "เสร็จสิ้น", elapsed)
+            _task_callback(task_output)  # Also call original logger
+
+        return callback
+
+    # Emit initial progress for first agent
+    emit_progress(request_id, CHAT_AGENT_NAMES[0], "running", "กำลังตีความคำขอ...")
+
+    # --- Tasks 1-4: Shared Foundation ---
+    foundation = build_foundation_tasks(agents, user_message)
+    interpret_task = foundation["interpret"]
+    retrieve_task = foundation["retrieve"]
+    sql_task = foundation["sql"]
+    citation_task = foundation["citation"]
+
+    # --- Task 5: Analyze ---
+    analyze_task = Task(
+        description=ACCIDENT_ANALYSIS_PROMPT,
+        expected_output="ผลการวิเคราะห์ข้อมูลอุบัติเหตุ รวมถึง key_findings, trends, risk_areas, recommended_actions",
+        agent=agents["analyst"],
+        context=[retrieve_task, sql_task, citation_task],
+    )
+
+    # --- Task 6: Build charts ---
+    chart_build_task = Task(
+        description=CHART_BUILDER_PROMPT,
+        expected_output=(
+            "JSON array ของ ChartSpec objects พร้อม render บน ChartRenderer "
+            "แต่ละ item มี fields: type, title, data.labels, data.datasets, options, source_note"
+        ),
+        agent=agents["chart_builder"],
+        context=[retrieve_task, sql_task, analyze_task, citation_task],
+    )
+
+    # --- Task 7: Write report ---
+    write_task = Task(
+        description=REPORT_WRITER_PROMPT,
+        expected_output=(
+            "รายงานภาษาไทยในรูปแบบ Markdown ที่มีโครงสร้างชัดเจน "
+            "พร้อม inline citation [C-001] และ reference list ท้ายรายงาน "
+            "รวมถึงข้อเสนอคำถามติดตาม 3 ข้อ"
+        ),
+        agent=agents["writer"],
+        context=[analyze_task, chart_build_task, citation_task],
+    )
+
+    tasks = [interpret_task, retrieve_task, sql_task, citation_task, analyze_task, chart_build_task, write_task]
+
+    # Custom task callback that emits progress
+    current_task_idx = [0]  # Use list to allow mutation in closure
+
+    def progress_task_callback(task_output):
+        idx = current_task_idx[0]
+        elapsed = time.time() - start_time
+        agent_name = CHAT_AGENT_NAMES[idx] if idx < len(CHAT_AGENT_NAMES) else f"Agent {idx}"
+        emit_progress(request_id, agent_name, "done", "เสร็จสิ้น", elapsed)
+
+        # Emit "running" for next agent
+        next_idx = idx + 1
+        if next_idx < len(CHAT_AGENT_NAMES):
+            emit_progress(request_id, CHAT_AGENT_NAMES[next_idx], "running", "กำลังทำงาน...")
+
+        current_task_idx[0] = next_idx
+        _task_callback(task_output)
+
+    # --- Build and run Crew ---
+    crew = Crew(
+        agents=list(agents.values()),
+        tasks=tasks,
+        process=Process.sequential,
+        verbose=True,
+        step_callback=_step_callback,
+        task_callback=progress_task_callback,
+    )
+
+    sep = "★" * 60
+    logger.info(
+        "\n%s\n🚀 [CREW+PROGRESS] message: %s\n%s",
+        sep, user_message[:120], sep
+    )
+
+    try:
+        result = crew.kickoff()
+        elapsed = time.time() - start_time
+        logger.info(f"Crew completed in {elapsed:.1f}s")
+        return _parse_crew_result(result, elapsed)
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"Crew failed after {elapsed:.1f}s: {e}")
+        # Emit error for current agent
+        if current_task_idx[0] < len(CHAT_AGENT_NAMES):
+            emit_progress(request_id, CHAT_AGENT_NAMES[current_task_idx[0]], "error", str(e)[:100], elapsed)
+        return AgentResponse(
+            content=f"เกิดข้อผิดพลาดในการประมวลผล: {str(e)}",
+            topic="error",
+            metadata={"error": str(e), "elapsed_seconds": elapsed},
+        )

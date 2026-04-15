@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
 from src.db.pool import get_async_pool, close_async_pool, close_sync_pool
-from src.routers import health, chat, ingest, test_ui, evidence, upload, documents, citation
+from src.routers import health, chat, ingest, test_ui, evidence, upload, documents, citation, policy_brief
 
 # Configure logging
 logging.basicConfig(
@@ -82,6 +82,7 @@ app.include_router(evidence.router)
 app.include_router(upload.router)
 app.include_router(documents.router)
 app.include_router(citation.router)
+app.include_router(policy_brief.router)
 app.include_router(test_ui.router)
 
 

@@ -34,6 +34,12 @@ class EvidenceItem(BaseModel):
     original_url: str = Field("", description="Original source URL (MinIO, PostgreSQL, API)")
     open_url: str = Field("", description="Clickable URL for frontend: /api/documents/open/{id}")
 
+    # APA 7th Edition metadata
+    apa_type: str = Field("report", description="report | book | article | website | dataset | law")
+    apa_authors: str = Field("", description="Author/organization name for APA reference")
+    apa_year: str = Field("", description="Publication year (พ.ศ. or ค.ศ.)")
+    apa_publisher: str = Field("", description="Publisher or organization")
+
 
 class Claim(BaseModel):
     """A single factual claim that needs evidence backing."""

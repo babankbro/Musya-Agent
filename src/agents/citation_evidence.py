@@ -21,30 +21,70 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 CITATION_EVIDENCE_PROMPT = """คุณคือ Citation & Evidence Agent — ผู้เชี่ยวชาญด้านการตรวจสอบหลักฐานและการอ้างอิง
+ตามมาตรฐาน **APA 7th Edition** ปรับใช้กับรายงานตรวจราชการสาธารณสุขไทย
 
-จากข้อมูลที่ได้จาก Retrieval Agent และ SQL Specialist ให้ดำเนินการดังนี้:
+## รูปแบบการอ้างอิง APA 7th Edition (Thai Inspection Reports)
+
+### ประเภทแหล่งอ้างอิงที่ใช้ในระบบ
+
+| ประเภท | APA Type | รูปแบบ bibliography_text |
+|--------|----------|------------------------|
+| รายงานตรวจราชการ (NotebookLM PDF) | report | สำนักงานสาธารณสุขจังหวัด{จังหวัด}. ({ปี พ.ศ.}). *รายงานตรวจราชการกระทรวงสาธารณสุข รอบที่ {รอบ} ปีงบประมาณ {ปี}*. กระทรวงสาธารณสุข. |
+| ฐานข้อมูล Musya Agent | dataset | Musya Agent. ({ปี}). *{ชื่อตาราง}* [Data set]. Musya Agent Database. |
+| เว็บไซต์ HDC/กระทรวง | website | {ชื่อหน่วยงาน}. ({ปี}). *{ชื่อหน้า}*. {ชื่อเว็บไซต์}. {URL} |
+| กฎหมาย/ประกาศ | law | {ชื่อกฎหมาย}, พ.ศ. {ปี}. ราชกิจจานุเบกษา เล่ม {เล่ม} ตอนที่ {ตอน}. |
+| บทความวิชาการ | article | {ผู้เขียน}. ({ปี}). {ชื่อบทความ}. *{ชื่อวารสาร}*, {ปีที่}({ฉบับที่}), {หน้า}. {DOI} |
+
+### รูปแบบ Inline Citation
+- **รายงานราชการ**: [C-001] หรือ (สสจ.{จังหวัด}, {ปี}, หน้า {หน้า})
+- **ฐานข้อมูล**: [C-002] หรือ (Musya Agent Database, {ปี})
+- **เว็บไซต์**: [C-003] หรือ ({หน่วยงาน}, {ปี})
+
+### กฎการจัดลำดับ Citation Code
+- C-001 ถึง C-099: รายงานตรวจราชการ (notebooklm_pdf) — เรียงตาม topic: RTI → Mental → NCD
+- C-100 ถึง C-199: ฐานข้อมูล (database)
+- C-200 ถึง C-299: เว็บไซต์/เอกสารภายนอก
+
+## Phase 3 Extension — NotebookLM PDF Sources
+
+สำหรับ Policy Brief pipeline จะมี evidence_type เพิ่มเติม:
+- `notebooklm_pdf`: ข้อมูลจาก PDF รายงานตรวจราชการผ่าน NotebookLM
+  - source_ref รูปแบบ: "notebooklm:{notebook_id}:{filename}"
+  - trust_level: "high" (รายงานราชการ ความน่าเชื่อถือสูง)
+  - page_ref รูปแบบ: "ตรวจราชการ รอบที่ 2 ปี 2564"
+  - apa_type: "report"
+  - apa_authors: "สำนักงานสาธารณสุขจังหวัด{จังหวัด}"
+  - apa_publisher: "กระทรวงสาธารณสุข"
+
+## ขั้นตอนการดำเนินการ
+
+จากข้อมูลที่ได้จาก Retrieval Agent, SQL Specialist หรือ NLM Data Fetcher ให้ดำเนินการ:
 
 1. **Normalize Evidence**: แปลงผลลัพธ์ทั้งหมดให้เป็น evidence items ที่มี metadata ครบถ้วน
-   - ระบุ evidence_type (document / database / api)
+   - ระบุ evidence_type (document / database / api / notebooklm_pdf)
    - ระบุ source_ref, title, page_ref, section_label
    - กำหนด trust_level (high / medium / low)
    - สร้าง original_url และ open_url
+   - เติม APA metadata: apa_type, apa_authors, apa_year, apa_publisher
 
 2. **Map Claims to Evidence**: วิเคราะห์ข้อสรุปทั้งหมดและเชื่อมกับหลักฐาน
    - ระบุว่าแต่ละข้อสรุปเป็น statistic / comparison / trend / recommendation / general_finding
    - กำหนด support_level: supported / partially_supported / insufficient / conflicting
    - กำหนด evidence_strength: strong / moderate / weak
+   - **ตัวเลข KPI ทุกตัวต้องมี evidence** (อัตราต่อแสน, Median, ✓/✗ สถานะ)
 
-3. **Generate Citations**: สร้าง citation code (C-001, C-002, ...)
-   - สร้าง citation_text สำหรับแสดง inline ในรายงาน
-   - สร้าง bibliography_text สำหรับ reference list ท้ายรายงาน
+3. **Generate APA Citations**: สร้าง citation code (C-001, C-002, ...)
+   - สร้าง citation_text: inline สั้น เช่น "(สสจ.อุบลราชธานี, 2567, หน้า 45)"
+   - สร้าง bibliography_text: APA 7th full reference
    - ระบุ open_url สำหรับคลิกกลับไปดูเอกสารต้นฉบับ
+   - จัดลำดับตามกฎ: C-001..C-099 (reports), C-100..C-199 (database), C-200+ (external)
 
 4. **Prepare Source Notes**: เตรียม source_note สำหรับกราฟและตาราง
-   - แต่ละกราฟ/ตารางต้องมี source_note ที่ระบุแหล่งข้อมูล + citation code
+   - แต่ละกราฟ/ตารางต้องมี source_note: "ที่มา: {APA inline} [C-xxx]"
 
 5. **Coverage Check**: ตรวจสอบความครอบคลุม
    - ข้อสรุปเชิงตัวเลขทุกข้อต้องมี citation
+   - KPI ตาม Style Guide ทุกตัวต้อง trace กลับไปหาหลักฐานได้
    - กราฟ/ตารางทุกชิ้นต้องมี source_note
    - flag ข้อสรุปที่ไม่มีหลักฐานรองรับ
 
@@ -54,7 +94,7 @@ CITATION_EVIDENCE_PROMPT = """คุณคือ Citation & Evidence Agent — �
   "evidence_items": [
     {
       "evidence_id": "EV-001",
-      "evidence_type": "document|database|api",
+      "evidence_type": "notebooklm_pdf|document|database|api",
       "source_ref": "filename or table name",
       "title": "readable title",
       "page_ref": "12",
@@ -62,7 +102,11 @@ CITATION_EVIDENCE_PROMPT = """คุณคือ Citation & Evidence Agent — �
       "trust_level": "high|medium|low",
       "text_snippet": "key excerpt...",
       "original_url": "minio://uploads/...",
-      "open_url": "/api/documents/open/..."
+      "open_url": "/api/documents/open/...",
+      "apa_type": "report|dataset|website|article|law",
+      "apa_authors": "สำนักงานสาธารณสุขจังหวัด...",
+      "apa_year": "2567",
+      "apa_publisher": "กระทรวงสาธารณสุข"
     }
   ],
   "claims": [
@@ -79,18 +123,21 @@ CITATION_EVIDENCE_PROMPT = """คุณคือ Citation & Evidence Agent — �
     {
       "citation_code": "C-001",
       "evidence_id": "EV-001",
-      "source_type": "document|database",
+      "source_type": "notebooklm_pdf|document|database",
       "source_ref": "filename",
-      "citation_text": "short display text",
-      "bibliography_text": "full reference text",
+      "citation_text": "(สสจ.อุบลราชธานี, 2567, หน้า 45)",
+      "bibliography_text": "สำนักงานสาธารณสุขจังหวัดอุบลราชธานี. (2567). *รายงานตรวจราชการกระทรวงสาธารณสุข รอบที่ 2 ปีงบประมาณ 2567*. กระทรวงสาธารณสุข.",
       "open_url": "/api/documents/open/...",
       "trust_level": "high"
     }
   ],
   "source_notes": {
-    "charts": "ที่มา: ... [C-001]",
-    "tables": "ที่มา: ... [C-001]"
+    "charts": "ที่มา: รายงานตรวจราชการฯ จ.อุบลราชธานี ปี 2567 [C-001]",
+    "tables": "ที่มา: รายงานตรวจราชการฯ จ.อุบลราชธานี ปี 2567 [C-001]"
   },
+  "reference_list": [
+    "[C-001] สำนักงานสาธารณสุขจังหวัดอุบลราชธานี. (2567). *รายงานตรวจราชการฯ*. กระทรวงสาธารณสุข."
+  ],
   "coverage": {
     "total_claims": 5,
     "supported": 4,
@@ -295,6 +342,10 @@ def parse_evidence_context(raw_output: str) -> EvidenceContext:
                 trust_level=item.get("trust_level", "medium"),
                 original_url=item.get("original_url", ""),
                 open_url=item.get("open_url", ""),
+                apa_type=item.get("apa_type", "report"),
+                apa_authors=item.get("apa_authors", ""),
+                apa_year=item.get("apa_year", ""),
+                apa_publisher=item.get("apa_publisher", ""),
             ))
         except Exception as e:
             logger.warning("Skipping malformed evidence item: %s", e)
