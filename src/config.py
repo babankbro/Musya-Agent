@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     ALLOW_EXTERNAL_URL_IMPORT: bool = True
     EXTERNAL_URL_TIMEOUT: int = 30
 
+    # ThaiJO Academic Search
+    THAIJO_API_URL: str = "http://localhost:8505/api/v1/thaijo"
+    THAIJO_TIMEOUT: int = 120
+    THAIJO_DEFAULT_SIZE: int = 5
+    THAIJO_MAX_SIZE: int = 10
+    THAIJO_ENABLED: bool = True
+
+    # Redis (shared with ThaiJO microservice for PDF summary cache)
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_PREFIX: str = "pdf_cache"
+
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000

@@ -302,9 +302,33 @@ def delete_document_chunks(source_path: str) -> int:
         raise
 
 
+_TOPIC_ALIASES: dict[str, str] = {
+    "rti": "accident",
+    "mental": "mental_health",
+    "ncd": "nutrition",
+    "all": "",
+    "general": "",
+}
+
+
 def search(query: str, topic: str | None = None, n_results: int = 5) -> list[dict]:
-    """Search documents with optional topic filter."""
-    where = None
+    """Search documents with optional topic filter.
+
+    Normalises agent topic codes (rti, mental, ncd) to ingest-time values
+    (accident, mental_health, nutrition). If the filtered search returns no
+    results it retries with no topic filter so documents tagged 'general' or
+    any other topic are still found.
+    """
+    # Normalise topic alias (rti → accident, mental → mental_health, etc.)
     if topic:
-        where = {"topic": topic}
-    return search_documents(query=query, n_results=n_results, where=where)
+        topic = _TOPIC_ALIASES.get(topic.lower(), topic)
+
+    where = {"topic": topic} if topic else None
+    results = search_documents(query=query, n_results=n_results, where=where)
+
+    # Fallback: retry without topic filter if filtered search returns nothing
+    if not results and where is not None:
+        logger.debug("search(): no results for topic=%s, retrying without filter", topic)
+        results = search_documents(query=query, n_results=n_results, where=None)
+
+    return results

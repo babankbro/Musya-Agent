@@ -6,6 +6,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="User message text")
     session_id: str | None = Field(None, description="Chat session ID for context")
     user_id: str | None = Field(None, description="User ID from ChatV1 auth")
+    mode: str | None = Field(None, description="Chat mode: 'short' for quick answers, None for full report")
 
 
 class ReportRequest(BaseModel):

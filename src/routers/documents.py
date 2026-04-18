@@ -120,6 +120,70 @@ async def list_documents(
     }
 
 
+@router.get("/registry")
+async def list_registry(
+    topic: str = Query("", description="Filter by topic"),
+    search: str = Query("", description="Title/filename search"),
+) -> dict:
+    """Return all document_registry rows with APA citation text and open_url.
+
+    Used by the policy_brief_ui Reference Library tab to show all documents
+    stored in MinIO with clickable PDF links.
+    """
+    conditions = ["(file_path IS NOT NULL OR minio_path IS NOT NULL)"]
+    params: list = []
+
+    if topic:
+        conditions.append("topic = %s")
+        params.append(topic)
+    if search:
+        conditions.append("(title ILIKE %s OR file_path ILIKE %s)")
+        params.extend([f"%{search}%", f"%{search}%"])
+
+    where = "WHERE " + " AND ".join(conditions)
+
+    try:
+        rows = query_db(
+            f"""SELECT document_id, title, document_type, file_path, minio_path,
+                       topic, ingestion_status, chunk_count, total_pages,
+                       apa_authors, apa_year, apa_publisher, apa_doi, apa_url,
+                       apa_type, apa_edition, apa_volume, apa_pages, uploaded_at
+                FROM document_registry
+                {where}
+                ORDER BY topic, apa_year DESC NULLS LAST, title""",
+            params,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Database error: {e}")
+
+    docs = []
+    for row in rows:
+        doc_id = row.get("document_id")
+        fp = row.get("file_path") or row.get("minio_path") or ""
+        apa_text = format_apa_reference(row)
+        docs.append({
+            "document_id": doc_id,
+            "title": row.get("title", ""),
+            "topic": row.get("topic", ""),
+            "document_type": row.get("document_type", ""),
+            "file_path": fp,
+            "total_pages": row.get("total_pages") or 0,
+            "chunk_count": row.get("chunk_count") or 0,
+            "ingestion_status": row.get("ingestion_status", ""),
+            "apa_citation": apa_text,
+            "apa": {
+                "authors": row.get("apa_authors", "") or "",
+                "year": row.get("apa_year", "") or "",
+                "publisher": row.get("apa_publisher", "") or "",
+                "doi": row.get("apa_doi", "") or "",
+                "type": row.get("apa_type", "report") or "report",
+            },
+            "open_url": f"/api/documents/open/{doc_id}" if doc_id else "",
+        })
+
+    return {"total": len(docs), "documents": docs}
+
+
 @router.get("/{document_id}")
 async def get_document(document_id: int):
     """Get single document detail with full APA metadata."""

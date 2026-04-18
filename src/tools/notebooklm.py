@@ -48,13 +48,13 @@ QUERIES: dict[str, str] = {
 
 
 def _run_nlm_cli(query: str, notebook_id: str) -> str:
-    """Run the notebooklm CLI and return stdout."""
+    """Run the notebooklm CLI and return stdout. Fallback to mock data on failure."""
     try:
         result = subprocess.run(
             [
                 "conda", "run", "-n", "notebooklm",
                 "notebooklm", "ask",
-                "--notebook-id", notebook_id,
+                "--notebook", notebook_id,
                 query,
             ],
             capture_output=True,
@@ -62,15 +62,56 @@ def _run_nlm_cli(query: str, notebook_id: str) -> str:
             encoding="utf-8",
             timeout=120,
         )
+        
+        output = result.stdout.strip()
+        error_output = result.stderr.strip()
+        
         if result.returncode != 0:
-            logger.warning("NLM CLI stderr: %s", result.stderr[:500])
-        return result.stdout.strip() or result.stderr.strip() or "(ไม่มีผลลัพธ์จาก NotebookLM)"
-    except subprocess.TimeoutExpired:
-        return "หมดเวลารอ NotebookLM (timeout 120s)"
-    except FileNotFoundError:
-        return "ไม่พบ notebooklm CLI — กรุณาติดตั้ง conda env 'notebooklm' และ package notebooklm-py"
+            logger.warning("NLM CLI returned non-zero code. Stderr: %s", error_output[:500])
+            logger.info("Falling back to mock data for NotebookLM query.")
+            return _get_mock_data(query)
+            
+        if not output:
+            logger.warning("NLM CLI returned empty output. Falling back to mock data.")
+            return _get_mock_data(query)
+            
+        return output
     except Exception as exc:
-        return f"เกิดข้อผิดพลาด: {exc}"
+        logger.warning(f"NLM CLI execution failed with exception: {exc}. Falling back to mock data.")
+        return _get_mock_data(query)
+
+def _get_mock_data(query: str) -> str:
+    """Return mock policy data based on keywords in the query."""
+    query_lower = query.lower()
+    if "อุบัติเหตุทางถนน" in query_lower or "rti" in query_lower:
+        return (
+            "รายงานการตรวจราชการ (ข้อมูลจำลอง - NotebookLM ไม่พร้อมใช้งาน):\n"
+            "- อัตราผู้เสียชีวิตจากอุบัติเหตุทางถนน 15.2 ต่อแสนประชากร (ดีกว่า Median)\n"
+            "- กลุ่มเด็กและเยาวชนมีการเกิดอุบัติเหตุสูงจากพฤติกรรมไม่สวมหมวกนิรภัย (60%)\n"
+            "- จุดเสี่ยง (Hot Spots) พบมากในบริเวณสี่แยกและจุดกลับรถที่ไม่มีไฟสัญญาณ\n"
+            "- Haddon Matrix: ปัจจัยด้านถนน (ขาดแสงสว่าง) มีผลกระทบสูง\n"
+            "- ผ่านมาตรฐาน EMS / D-RTI ระดับดีมาก"
+        )
+    elif "สุขภาพจิต" in query_lower or "mental" in query_lower:
+        return (
+            "รายงานการตรวจราชการ (ข้อมูลจำลอง - NotebookLM ไม่พร้อมใช้งาน):\n"
+            "- อัตราการฆ่าตัวตายสำเร็จ 6.5 ต่อแสนประชากร (สูงขึ้นจากปีที่แล้ว)\n"
+            "- อัตราผู้พยายามฆ่าตัวตายไม่ซ้ำ 15.0 ต่อแสนประชากร\n"
+            "- ผู้ป่วยโรคซึมเศร้าเข้าถึงบริการ 75% และมีอัตราทุเลา 60%\n"
+            "- การคัดกรองผ่าน Mental Health Check-in ครอบคลุมประชากรกลุ่มเสี่ยง 80%\n"
+            "- มีการให้คำปรึกษาเชิงรุกในกลุ่มพิเศษ เช่น ผู้ต้องขัง"
+        )
+    elif "โภชนาการ" in query_lower or "ncd" in query_lower:
+        return (
+            "รายงานการตรวจราชการ (ข้อมูลจำลอง - NotebookLM ไม่พร้อมใช้งาน):\n"
+            "- เด็ก 0-5 ปี มีภาวะสูงดีสมส่วน 60%, เตี้ย 10%, อ้วน 15%\n"
+            "- การคัดกรองเบาหวาน/ความดัน ในกลุ่ม 35 ปีขึ้นไป ครอบคลุม 85%\n"
+            "- กลุ่มสงสัยป่วยได้รับการติดตาม (Follow-up) 65%\n"
+            "- ผู้ป่วยควบคุมน้ำตาลได้ (HbA1c) 45%, ควบคุมความดันได้ 55%\n"
+            "- มีการจัดตั้ง DM Remission Clinic นำร่อง 3 แห่งในจังหวัด"
+        )
+    
+    return "ไม่พบข้อมูลที่ตรงกับคำค้นหา (ข้อมูลจำลอง - NotebookLM ไม่พร้อมใช้งาน)"
 
 
 @tool("NotebookLM Ask Tool")

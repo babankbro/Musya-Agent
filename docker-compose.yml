@@ -9,6 +9,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      thaijo:
+        condition: service_started
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -25,10 +27,39 @@ services:
       HOST: "0.0.0.0"
       PORT: "8000"
       CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+      THAIJO_API_URL: http://thaijo:8000/api/v1/thaijo
+      THAIJO_ENABLED: "true"
     env_file:
       - .env
     ports:
       - "8000:8000"
+    networks:
+      - chatv1_net
+
+  thaijo:
+    build:
+      context: ../thaijo
+    container_name: thaijo_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8505:8000"
+    depends_on:
+      - redis
+    networks:
+      - chatv1_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: musya_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     networks:
       - chatv1_net
 
@@ -77,9 +108,13 @@ services:
 
 volumes:
   pgdata:
+    external: true
     name: chatv1_pgdata
   minio_data:
+    external: true
     name: chatv1_minio_data
+  redis_data:
+    name: musya_redis_data
 
 networks:
   chatv1_net:

@@ -1,7 +1,7 @@
 # Citation & Evidence Agent — คู่มืออธิบายการทำงานและ Test UI
 
 > อธิบาย Citation & Evidence Agent (Agent 4 ใน pipeline), การทำงานของ `citation_test_ui.html`,
-> และความสัมพันธ์กับ workflow หลักใน [AGENT_WORKFLOW.md](./AGENT_WORKFLOW.md)
+> และความสัมพันธ์กับ workflow หลักใน [AGENT_WORKFLOW_UNIFIED.md](./AGENT_WORKFLOW_UNIFIED.md)
 
 ---
 
@@ -9,7 +9,7 @@
 
 Citation & Evidence Agent คือ **"ชั้นตรวจสอบความน่าเชื่อถือ" (Trust Layer)** ที่อยู่กลาง Pipeline  
 ทำหน้าที่รับผลลัพธ์จาก Agent ที่ดึงข้อมูล (Agent 2 + 3) แล้วแปลงให้เป็นหลักฐานที่ตรวจสอบย้อนกลับได้  
-ก่อนส่งต่อให้ Agent ที่วิเคราะห์และเขียนรายงาน (Agent 5 + 6 + 7)
+ก่อนส่งต่อให้ Agent ที่วิเคราะห์และเขียนรายงาน (Agent 5–9)
 
 ### ปัญหาที่แก้ได้
 
@@ -47,13 +47,19 @@ User Message
 ╚═══════════════════════════════════════╝
      │
      ▼
-[Agent 5] Accident Data Analyst      → วิเคราะห์จาก EvidenceContext
+[Agent 5] Accident Data Analyst      → วิเคราะห์จาก EvidenceContext, Haddon Matrix
      │
      ▼
 [Agent 6] Chart Builder              → สร้างกราฟ + source_note จาก evidence
      │
      ▼
-[Agent 7] Report Writer              → เขียนรายงาน + inline [C-001] + references
+[Agent 7] Research Synthesizer       → narrative prose (1,200-2,000 คำ)
+     │
+     ▼
+[Agent 8] Deep Analyst               → root cause, policy gaps (1,000-1,500 คำ)
+     │
+     ▼
+[Agent 9] Report Composer            → เขียนรายงาน + inline [C-001] + references (2,000-4,000 คำ)
      │
      ▼
 AgentResponse → Frontend (Test UI)
@@ -88,10 +94,12 @@ AgentResponse → Frontend (Test UI)
 
 | แหล่งข้อมูล | trust_level |
 |------------|------------|
-| Document RAG (เอกสารที่ upload) | `high` |
+| รายงานตรวจราชการ NotebookLM PDF (notebooklm_pdf) | `high` |
+| Document RAG (เอกสารที่ upload ผ่าน MinIO) | `high` |
 | Mart tables (ข้อมูลสรุปแล้ว) | `high` |
 | Fact tables (ข้อมูลดิบ) | `medium` |
 | Custom SQL | `medium` |
+| บทความวิชาการ ThaiJO (thaijo_article) | `medium` |
 | External API | `low` |
 
 ---
@@ -174,7 +182,7 @@ EV-002 (database) → C-002
 
 ## 4. Output ที่ส่งต่อ (EvidenceContext)
 
-Agent นี้ส่ง JSON object ไปยัง Agent 5, 6, 7 ผ่าน CrewAI task context:
+Agent นี้ส่ง JSON object ไปยัง Agent 5–9 ผ่าน CrewAI task context:
 
 ```json
 {
@@ -244,12 +252,33 @@ EvidenceContext       — รวมทุกอย่างข้างต้น
 
 ---
 
-## 6. Tools ที่ Agent ใช้
+## 6. Tools ที่ Agent ใช้ (4 tools)
 
 | Tool | ฟังก์ชัน | เขียนใน |
 |------|---------|--------|
+| `list_all_documents_apa` | แสดงรายการเอกสารทั้งหมดพร้อม APA citation | `citation_evidence.py` |
+| `lookup_document_apa` | ค้นหา APA citation ของเอกสารเฉพาะ | `citation_evidence.py` |
 | `register_evidence` | บันทึก EvidenceItem ลง `evidence_registry` | `citation_evidence.py` |
 | `register_claim_links` | บันทึก Claim↔Evidence links ลง `claim_evidence_link` | `citation_evidence.py` |
+
+### Citation Code Ranges
+
+| Range | Source Type | Trust Level |
+|-------|-----------|-------------|
+| C-001 to C-099 | Reports (notebooklm_pdf / document) | High |
+| C-100 to C-199 | Database / dataset | High (mart) / Medium (fact) |
+| C-200 to C-299 | ThaiJO academic articles | Medium |
+| C-300+ | External sources | Variable |
+
+### Evidence Types
+
+| evidence_type | แหล่งข้อมูล |
+|--------------|-------------|
+| `document` | เอกสาร PDF/DOCX จาก MinIO |
+| `database` | ข้อมูลจาก mart/fact tables |
+| `api` | External API response |
+| `thaijo_article` | บทความจาก TCI-THAIJO |
+| `notebooklm_pdf` | เอกสารจาก NotebookLM |
 
 ---
 
@@ -257,7 +286,7 @@ EvidenceContext       — รวมทุกอย่างข้างต้น
 
 | ไฟล์ | บทบาท |
 |------|------|
-| `src/agents/citation_evidence.py` | Agent factory, CITATION_EVIDENCE_PROMPT, 2 tools, `parse_evidence_context()` |
+| `src/agents/citation_evidence.py` | Agent factory, CITATION_EVIDENCE_PROMPT, 4 tools, `parse_evidence_context()` |
 | `src/schemas/evidence.py` | Pydantic models: EvidenceItem, Claim, ClaimEvidenceLink, EnhancedCitation, CoverageReport, EvidenceContext |
 | `src/routers/evidence.py` | API endpoints: `GET /api/evidence/{id}`, `/api/evidence/session/{id}` |
 | `database/010_evidence_citation.sql` | Migration สร้าง `evidence_registry` + `claim_evidence_link` |
@@ -273,7 +302,7 @@ EvidenceContext       — รวมทุกอย่างข้างต้น
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  🔍 Citation & Evidence Agent Test UI                            │
-│  Test the 7-agent pipeline with evidence tracking                │
+│  Test the 10-agent pipeline with evidence tracking                │
 ├──────────────────────────────────────────────────────────────────┤
 │  [💬 Chat Test] [📚 Evidence API] [📄 Documents] [🏥 Health]    │
 ├──────────────────────────────────────────────────────────────────┤
@@ -287,7 +316,7 @@ EvidenceContext       — รวมทุกอย่างข้างต้น
 
 ### Tab 1: 💬 Chat Test
 
-**วัตถุประสงค์:** ทดสอบ 7-agent pipeline ทั้งหมด และดูผลลัพธ์ citation ที่ได้
+**วัตถุประสงค์:** ทดสอบ 10-agent pipeline ทั้งหมด และดูผลลัพธ์ citation ที่ได้
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -462,11 +491,15 @@ citation_test_ui.html                  Backend                     PostgreSQL
                          ↓                               INSERT claim_evidence_link
                          EvidenceContext
                ↓
-               [Agent 5] Analyst
+               [Agent 5] Accident Analyst
                ↓
                [Agent 6] Chart Builder
                ↓
-               [Agent 7] Report Writer
+               [Agent 7] Research Synthesizer
+               ↓
+               [Agent 8] Deep Analyst
+               ↓
+               [Agent 9] Report Composer
                ↓
                AgentResponse {
                  content, charts,
@@ -543,7 +576,7 @@ citation_test_ui.html                  Backend                     PostgreSQL
 พิมพ์: "สถิติอุบัติเหตุจังหวัดเชียงใหม่ ทุกปี 2020-2026"
 กด: 🚀 Send to Agent Pipeline
 
-รอ ~2-3 นาที (7 agents ทำงานต่อเนื่อง)
+รอ ~2-3 นาที (10 agents ทำงานต่อเนื่อง)
 
 ผลที่คาดหวัง:
   Pipeline: phase2_with_citation_evidence
@@ -567,14 +600,14 @@ citation_test_ui.html                  Backend                     PostgreSQL
 
 ---
 
-## 12. ความสัมพันธ์กับ AGENT_WORKFLOW.md
+## 12. ความสัมพันธ์กับ AGENT_WORKFLOW_UNIFIED.md
 
-ดูเอกสาร [AGENT_WORKFLOW.md](./AGENT_WORKFLOW.md) สำหรับ workflow ภาพรวม
+ดูเอกสาร [AGENT_WORKFLOW_UNIFIED.md](./AGENT_WORKFLOW_UNIFIED.md) สำหรับ workflow ภาพรวม
 
 เอกสารนี้เจาะลึกเฉพาะ **Agent 4** และ **citation_test_ui.html** โดย:
 
-| หัวข้อใน AGENT_WORKFLOW.md | รายละเอียดใน เอกสารนี้ |
-|---------------------------|----------------------|
+| หัวข้อใน AGENT_WORKFLOW_UNIFIED.md | รายละเอียดใน เอกสารนี้ |
+|------------------------------------|----------------------|
 | Agent 4 — Citation & Evidence (ภาพรวม) | ส่วนที่ 2-6 (กระบวนการ 5 ขั้น, models, tools) |
 | API Endpoints | ส่วนที่ 8 (Evidence API tab, endpoints table) |
 | Test UI (`/static/citation_test_ui.html`) | ส่วนที่ 8-9 (ทุก tab อธิบายละเอียด) |
@@ -614,4 +647,4 @@ citation_test_ui.html                  Backend                     PostgreSQL
 
 ---
 
-*Last updated: 2026-04-13 | เกี่ยวข้องกับ: [AGENT_WORKFLOW.md](./AGENT_WORKFLOW.md), [CITATION_EVIDENCE_AGENT.md](./CITATION_EVIDENCE_AGENT.md)*
+*Last updated: 2026-04-16 | เกี่ยวข้องกับ: [AGENT_WORKFLOW_UNIFIED.md](./AGENT_WORKFLOW_UNIFIED.md), [CITATION_EVIDENCE_AGENT.md](./CITATION_EVIDENCE_AGENT.md)*

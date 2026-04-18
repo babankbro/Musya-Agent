@@ -1,8 +1,8 @@
 # เอกสาร Database & API Reference
 # Musya Agent — ฐานข้อมูลรวมและ API ทั้งระบบ
 
-> **เวอร์ชัน**: 2.2  
-> **วันที่**: 2026-04-14  
+> **เวอร์ชัน**: 2.3  
+> **วันที่**: 2026-04-16  
 > **Database**: PostgreSQL 16 + pgvector — `chat-aio`  
 > **ขอบเขต**: Agent backend + ตารางที่ใช้ร่วมกับ Chat-
 
@@ -23,7 +23,7 @@ Connection: postgresql://postgres:1234@localhost:5432/chat-aio
 ### 1.3 เอกสารอ้างอิง
 | เอกสาร | ตำแหน่ง |
 |--------|---------|
-| Agent SRS | `Agent/doc/SRS.md` |
+| Agent Architecture | `Agent/doc/ARCHITECTURE.md` |
 | Agent Architecture | `Agent/doc/ARCHITECTURE.md` |
 | Agent Existing DB Architecture | `Agent/doc/DATABASE_API_ARCHITECTURE.md` |
 | Chat- Database & API | `Chat-/doc/DATABASE_API.md` |
@@ -332,7 +332,7 @@ Dimension tables เสริม สำหรับ metadata แหล่งข�
 |--------|------|----------|---------|---------|
 | `evidence_id` | VARCHAR(20) | NOT NULL | — | Primary key (EV-001) |
 | `session_id` | VARCHAR(255) | YES | — | Chat session ที่สร้าง |
-| `evidence_type` | VARCHAR(20) | NOT NULL | — | `document` \| `database` \| `api` |
+| `evidence_type` | VARCHAR(20) | NOT NULL | — | `document` \| `database` \| `api` \| `thaijo_article` \| `notebooklm_pdf` |
 | `topic` | VARCHAR(100) | YES | `'general'` | โดเมน (accident, mental_health, etc.) |
 | `source_ref` | VARCHAR(500) | NOT NULL | — | ชื่อไฟล์หรือชื่อตาราง |
 | `title` | VARCHAR(500) | YES | — | ชื่อเอกสาร/dataset |
@@ -530,15 +530,15 @@ Dimension tables เสริม สำหรับ metadata แหล่งข�
 | **012** | `012_document_upload_enhanced.sql` | 🆕 Enhanced document_registry: file_path, file_size, APA metadata, upload_method, ingestion_status, source_type, external_url |
 | **013** | `013_apa_approval_status.sql` | 🆕 ADD COLUMN apa_approval_status (pending/draft/approved/rejected) |
 | **014** | `014_populate_document_chunks.sql` | 🗑️ DROP TABLE document_chunks (ChromaDB-era obsolete table removed) |
+| **015** | `015_thaijo_evidence.sql` | 🆕 Adds thaijo_* columns to evidence_registry (thaijo_pdf_url, thaijo_reference, thaijo_summary) |
 
 **วิธีรัน Migration**:
 ```bash
 psql -U postgres -d chat-aio -f database/001_shared_core.sql
 psql -U postgres -d chat-aio -f database/002_document_rag.sql
-# ... ไปจนถึง 010
-psql -U postgres -d chat-aio -f database/011_pgvector.sql   # pgvector
-psql -U postgres -d chat-aio -f database/012_document_upload_enhanced.sql  # Upload + APA
-python database/import_csv_all_years.py                     # Import CSV data
+# ... ไปจนถึง 015
+psql -U postgres -d chat-aio -f database/015_thaijo_evidence.sql  # ThaiJO evidence support
+python database/import_csv_all_years.py                           # Import CSV data
 ```
 
 ---
@@ -639,12 +639,34 @@ uploads/
 |--------|------|---------|
 | `GET` | `/` | Root info + API links |
 | `GET` | `/api/health` | Health check (PostgreSQL + MinIO + pgvector status) |
-| `POST` | `/api/chat` | Process chat → 7-agent pipeline → AgentResponse |
-| `POST` | `/api/chat/stream` | SSE streaming version |
+| `POST` | `/api/chat` | Process chat → 10-agent pipeline → AgentResponse |
+| `POST` | `/api/chat/unified` | Auto-route to chat or policy_brief pipeline |
+| `POST` | `/api/chat/stream` | SSE streaming with agent progress |
 | `POST` | `/api/ingest` | Bulk ingest documents (MinIO scan → extract → pgvector embeddings) |
+| `POST` | `/api/policy-brief` | Policy Brief pipeline (5 จังหวัด, 3 domains) |
+| `POST` | `/api/policy-brief/stream` | Policy Brief SSE streaming |
 | `GET` | `/test` | Standalone test UI (HTML) |
-| `GET` | `/documents` | 🆕 Document & Citation Manager UI |
+| `GET` | `/documents` | Document & Citation Manager UI |
 | `GET` | `/docs` | FastAPI Swagger auto-docs |
+
+### 7.1B ThaiJO APIs (✅ Implemented)
+
+| Method | Path | คำอธิบาย |
+|--------|------|---------|
+| `POST` | `/api/thaijo/search` | ค้นหาบทความวิชาการจาก TCI-THAIJO (ผ่าน ThaiJO microservice) |
+| `GET` | `/api/thaijo/status` | ตรวจสถานะ ThaiJO microservice |
+
+### 7.1C MinIO Browse APIs (✅ Implemented)
+
+| Method | Path | คำอธิบาย |
+|--------|------|---------|
+| `GET` | `/api/documents/minio/tree` | MinIO folder tree view |
+| `GET` | `/api/documents/minio/browse` | Browse MinIO prefix |
+| `GET` | `/api/documents/minio/read` | Read file text preview |
+| `POST` | `/api/documents/minio/apa-draft` | AI-generated APA metadata draft |
+| `POST` | `/api/documents/minio/approve` | Approve draft & trigger ingest |
+| `POST` | `/api/documents/analyze-upload` | Analyze uploaded file for APA |
+| `GET` | `/api/documents/registry` | List all registered documents |
 
 ### 7.2 Evidence & Document Access APIs (Citation & Evidence ✅)
 
@@ -771,7 +793,7 @@ uploads/
   }],
   "citations": [{"citation_code": "C-001", "source_type": "document", "source_ref": "policy.pdf", "citation_text": "(กรมทางหลวง, 2025, หน้า 12)", "bibliography_text": "กรมทางหลวง. (2025). *นโยบายความปลอดภัย*. กระทรวงคมนาคม."}],
   "follow_ups": ["คำถาม 1", "คำถาม 2", "คำถาม 3"],
-  "metadata": {"elapsed_seconds": 45.2, "agent_count": 7, "chart_count": 1}
+  "metadata": {"elapsed_seconds": 45.2, "agent_count": 10, "chart_count": 1}
 }
 ```
 
@@ -823,36 +845,46 @@ uploads/
 
 ## 9. Data Flow Patterns
 
-### 9.1 Agent Chat Query (End-to-End)
+### 9.1 Agent Chat Query (End-to-End — 10 agents)
 
 ```
-Browser → POST /api/chat → Agent Backend
+Browser → POST /api/chat/unified → Agent Backend
   │
-  ├── Agent 1: Request Interpreter
+  ├── Agent 0: Request Router
+  │   └── Classify → pipeline: "chat" | "policy_brief"
+  │
+  ├── Agent 1: Request Interpreter              [Fast LLM]
   │   └── LLM parse → {topics: ["อุบัติเหตุ"], geography: "เชียงใหม่", time_range: "2025"}
   │
-  ├── Agent 2: Data Retrieval
-  │   ├── search_documents("อุบัติเหตุเชียงใหม่") → pgvector (document_embeddings) → relevant chunks
+  ├── Agent 2: Data Retrieval                   [Fast LLM]
+  │   ├── search_documents("อุบัติเหตุเชียงใหม่") → pgvector → relevant chunks
   │   ├── get_province_year_summary("เชียงใหม่") → mart_province_year → JSON
-  │   └── get_province_roads("เชียงใหม่") → mart_province_road → JSON
+  │   ├── get_province_roads("เชียงใหม่") → mart_province_road → JSON
+  │   └── search_thaijo("อุบัติเหตุทางถนน เชียงใหม่") → ThaiJO articles
   │
-  ├── Agent 3: SQL Specialist
-  │   └── execute_custom_sql("SELECT ... FROM fact_accident_event WHERE ...") → rows
+  ├── Agent 3: SQL Specialist                   [Fast LLM]
+  │   └── execute_custom_sql("SELECT ... FROM fact_accident_event ...") → rows
   │
-  ├── Agent 4: Citation & Evidence Agent 🆕
+  ├── Agent 4: Citation & Evidence              [Fast LLM]
   │   ├── Map data → EvidenceItem list → INSERT INTO evidence_registry
   │   ├── Map claims → ClaimEvidenceLink → INSERT INTO claim_evidence_link
-  │   └── Generate APA citations → bibliography_text, citation_text
+  │   └── Generate APA citations (C-001~C-099 docs, C-100~C-199 DB, C-200~C-299 ThaiJO)
   │
-  ├── Agent 5: Analyst
-  │   └── Synthesize → key_findings, trends, risk_areas
+  ├── Agent 5: Accident Analyst                 [Pro LLM]
+  │   └── Synthesize → key_findings, trends, Haddon Matrix
   │
-  ├── Agent 6: Chart Builder
+  ├── Agent 6: Chart Builder                    [Pro LLM]
   │   ├── build_province_year_trend_chart("เชียงใหม่") → ChartSpec JSON
   │   └── build_province_roads_bar_chart("เชียงใหม่") → ChartSpec JSON
   │
-  └── Agent 7: Report Writer
-      └── Compile → Markdown report (Thai) + follow_ups
+  ├── Agent 7: Research Synthesizer             [Pro LLM]
+  │   └── Narrative prose → 4 blocks (1,200-2,000 คำ)
+  │
+  ├── Agent 8: Deep Analyst                     [Pro LLM]
+  │   └── Root cause, policy gaps → 4 dimensions (1,000-1,500 คำ)
+  │
+  └── Agent 9: Report Composer                  [Pro LLM]
+      └── Thai report (2,000-4,000 คำ) + follow_ups
 
   → AgentResponse {content, charts, tables, citations, follow_ups, metadata}
   → Browser renders: MessageList + ChartRenderer + TableRenderer
@@ -1029,6 +1061,16 @@ ALLOWED_FILE_TYPES=.pdf,.docx,.txt,.md
 AUTO_INGEST_ON_UPLOAD=true      # Auto-embed on upload
 ALLOW_EXTERNAL_URL_IMPORT=true  # Allow POST /api/documents/upload-url
 EXTERNAL_URL_TIMEOUT=30         # Seconds to wait for external URL download
+
+# ── ThaiJO Integration ──
+THAIJO_API_URL=http://72.61.120.205:8505/api/v1/thaijo
+THAIJO_TIMEOUT=120              # Request timeout (seconds)
+THAIJO_DEFAULT_SIZE=5           # Default number of results
+THAIJO_MAX_SIZE=10              # Max results per query
+THAIJO_ENABLED=true             # Enable/disable ThaiJO search
+
+# ── Report Settings ──
+REPORT_MAX_TOKENS=8192          # Max tokens for report generation
 ```
 
 ### E. Trigger Functions

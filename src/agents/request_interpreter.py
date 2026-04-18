@@ -27,6 +27,15 @@ REQUEST_INTERPRETER_PROMPT = """
 4. **report_type**: ประเภทรายงาน (health_plan, executive_summary, data_query, general_chat)
 5. **focus**: ประเด็นที่ต้องการเน้น (เช่น จุดเสี่ยง, แนวโน้ม, กลุ่มเสี่ยง)
 6. **language**: ภาษาที่ใช้ตอบ (th หรือ en)
+7. **academic_search_needed**: true ถ้าคำถามต้องการข้อมูลวิชาการ/งานวิจัย
+   - true เมื่อมีคำว่า: วิจัย, บทความ, วารสาร, ศึกษา, พบว่า, หลักฐาน, งานวิจัย
+   - true เมื่อมีคำว่า: research, evidence, study, journal, article
+   - true เมื่อ report_type = "health_plan" (ต้องการ evidence-based)
+   - false เมื่อถามแค่สถิติหรือข้อมูลจากฐานข้อมูลเท่านั้น
+8. **search_keywords**: คำค้นหาสำหรับ ThaiJO (2-5 คำ ภาษาไทย) — ระบุเมื่อ academic_search_needed=true เท่านั้น
+   - ตัดคำทั่วไปออก (มี, ไหม, เกี่ยวกับ, งานวิจัย)
+   - เก็บคำนาม/คำเฉพาะทาง
+   - ตัวอย่าง: "อุบัติเหตุทางถนน ปัจจัยเสี่ยง วัยรุ่น"
 
 ตอบเป็น JSON เท่านั้น:
 ```json
@@ -36,7 +45,9 @@ REQUEST_INTERPRETER_PROMPT = """
     "time_range": {{"start_date": "2025-01-01", "end_date": "2025-12-31"}},
     "report_type": "data_query",
     "focus": ["สถานการณ์ปัจจุบัน"],
-    "language": "th"
+    "language": "th",
+    "academic_search_needed": false,
+    "search_keywords": ""
 }}
 ```
 

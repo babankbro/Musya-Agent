@@ -447,7 +447,21 @@ image: pgvector/pgvector:pg16   # Official pgvector image
 | 008 | Duplicate prevention | UNIQUE constraints on fact tables |
 | 009 | Coordinates | Add `latitude`, `longitude` to `fact_accident_event` |
 | 010 | Evidence & Citations | `evidence_registry`, `claim_evidence_link` |
-| **011** | **pgvector 🆕** | **`CREATE EXTENSION vector` + `document_embeddings` table with HNSW index** |
+| **011** | **pgvector** | `CREATE EXTENSION vector` + `document_embeddings` table (`vector(3072)`) |
+| **012** | **Document upload enhanced** | ALTER `document_registry` — add `upload_*`, `apa_*`, `ingest_*` columns for document management |
+| **013** | **APA approval workflow** | ADD `apa_approval_status` to `document_registry` (`pending`/`approved`/`rejected`) |
+| **014** | **Document chunks cleanup** | DROP legacy `document_chunks` table; consolidate into `document_embeddings` |
+| **015** | **ThaiJO evidence** | ADD `thaijo_*` columns to `evidence_registry` (article_id, journal, authors, abstract, url) |
+
+
+> **⚠️ evidence_type CHECK constraint:** Migration 010 restricts `evidence_type` to `('document', 'database', 'api')`.
+> The code (added in Phase 3) also uses `'thaijo_article'` and `'notebooklm_pdf'`.
+> If you encounter a constraint violation, run:
+> ```sql
+> ALTER TABLE evidence_registry DROP CONSTRAINT IF EXISTS evidence_registry_evidence_type_check;
+> ALTER TABLE evidence_registry ADD CONSTRAINT evidence_registry_evidence_type_check
+>   CHECK (evidence_type IN ('document', 'database', 'api', 'thaijo_article', 'notebooklm_pdf'));
+> ```
 
 ---
 
@@ -461,7 +475,7 @@ image: pgvector/pgvector:pg16   # Official pgvector image
 5. **Handle empty results** - Return error JSON, not exceptions
 
 ### For Database Administrators:
-1. **Run migrations in order** - 001 → 002 → 003 → ... → 011
+1. **Run migrations in order** - 001 → 002 → 003 → ... → 015
 2. **Use correct Docker image** - `pgvector/pgvector:pg16` (not plain `postgres:16`)
 3. **Rebuild marts after CSV import** - Use `import_csv_all_years.py`
 4. **Monitor connection pools** - Check pool exhaustion in logs
@@ -523,7 +537,7 @@ Solution: Check CSV encoding (UTF-8), verify column count matches expected schem
 
 - **API Routes**: See `src/routers/chat.py`, `src/routers/test_ui.py`
 - **Agent Tools**: See `src/tools/chart_builder.py`, `src/tools/accident.py`
-- **Database Migrations**: See `database/001_*.sql` through `database/011_pgvector.sql`
+- **Database Migrations**: See `database/001_*.sql` through `database/015_thaijo_evidence.sql`
 - **Vector Store**: See `src/rag/vector_store.py` (pgvector implementation)
 - **RAG Pipeline**: See `src/rag/document_rag.py` (MinIO → pgvector ingestion)
 - **Data Import**: See `database/import_csv_all_years.py`

@@ -25,35 +25,57 @@ async def open_document(document_id: int, page: int | None = Query(None)):
     """
     try:
         rows = query_db(
-            "SELECT document_id, title, file_path, document_type FROM document_registry WHERE document_id = %s",
+            "SELECT document_id, title, file_path, minio_path, document_type FROM document_registry WHERE document_id = %s",
             (document_id,),
         )
-    except Exception:
-        rows = []
+    except Exception as e:
+        logger.error("open_document DB error id=%s: %s", document_id, e)
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
     if not rows:
         raise HTTPException(status_code=404, detail="เอกสารไม่พบในระบบ")
 
     doc = rows[0]
-    file_path = doc.get("file_path", "")
+    file_path = doc.get("file_path") or doc.get("minio_path") or ""
+    logger.info("open_document id=%s file_path=%r", document_id, file_path)
+
     if not file_path:
         raise HTTPException(status_code=404, detail="ไม่มี file_path สำหรับเอกสารนี้")
 
     try:
         data = download_document(file_path)
     except Exception as e:
+        logger.error("open_document MinIO error id=%s path=%r: %s", document_id, file_path, e)
         raise HTTPException(status_code=502, detail=f"ไม่สามารถดาวน์โหลดไฟล์จาก MinIO: {e}")
 
-    content_type = "application/pdf" if file_path.lower().endswith(".pdf") else "application/octet-stream"
-    if file_path.lower().endswith(".docx"):
-        content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if not isinstance(data, (bytes, bytearray)):
+        logger.error("open_document: download_document returned %r for path=%r", type(data), file_path)
+        raise HTTPException(status_code=502, detail="MinIO returned non-bytes data")
+
+    ext = file_path.lower().rsplit(".", 1)[-1] if "." in file_path else ""
+    _CONTENT_TYPES = {
+        "pdf": "application/pdf",
+        "txt": "text/plain; charset=utf-8",
+        "md": "text/plain; charset=utf-8",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    content_type = _CONTENT_TYPES.get(ext, "application/octet-stream")
 
     filename = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+    logger.info("open_document serving %d bytes as %s", len(data), content_type)
+
+    # RFC 5987: encode non-ASCII filename so HTTP headers don't crash
+    from urllib.parse import quote as _quote
+    try:
+        filename.encode("ascii")
+        cd = f'inline; filename="{filename}"'
+    except UnicodeEncodeError:
+        cd = f"inline; filename*=UTF-8''{_quote(filename)}"
 
     return StreamingResponse(
         io.BytesIO(data),
         media_type=content_type,
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        headers={"Content-Disposition": cd},
     )
 
 
@@ -62,7 +84,7 @@ async def document_info(document_id: int):
     """Get metadata about a document (title, file_path, total_pages, etc.)."""
     try:
         rows = query_db(
-            "SELECT document_id, title, file_path, document_type, total_pages, original_url, open_url "
+            "SELECT document_id, title, file_path, minio_path, document_type, total_pages, original_url "
             "FROM document_registry WHERE document_id = %s",
             (document_id,),
         )
@@ -72,7 +94,9 @@ async def document_info(document_id: int):
     if not rows:
         raise HTTPException(status_code=404, detail="เอกสารไม่พบในระบบ")
 
-    return rows[0]
+    doc = dict(rows[0])
+    doc["open_url"] = f"/api/documents/open/{document_id}"
+    return doc
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,7 @@ def format_apa_reference(doc: dict) -> str:
     Accepts document_registry rows or evidence items with apa_* fields.
     """
     apa_type = doc.get("apa_type", "report")
-    authors = doc.get("apa_authors", "") or doc.get("title", "ไม่ระบุ")
+    authors = (doc.get("apa_authors", "") or doc.get("title", "ไม่ระบุ")).rstrip(".")
     year = doc.get("apa_year", "") or "n.d."
     title = doc.get("title", "ไม่ระบุชื่อ")
     publisher = doc.get("apa_publisher", "")

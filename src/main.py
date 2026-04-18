@@ -6,6 +6,12 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv()
 
+# Fix REDIS_URL for local runs: Docker hostname 'redis' won't resolve outside containers
+_redis_url = os.environ.get("REDIS_URL", "")
+if "redis://redis:" in _redis_url:
+    os.environ["REDIS_URL"] = _redis_url.replace("redis://redis:", "redis://localhost:")
+    logging.getLogger(__name__).info("REDIS_URL patched for local run: %s", os.environ["REDIS_URL"])
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from src.config import get_settings
 from src.db.pool import get_async_pool, close_async_pool, close_sync_pool
 from src.routers import health, chat, ingest, test_ui, evidence, upload, documents, citation, policy_brief
+from src.routers.thaijo import router as thaijo_router
 
 # Configure logging
 logging.basicConfig(
@@ -83,6 +90,7 @@ app.include_router(upload.router)
 app.include_router(documents.router)
 app.include_router(citation.router)
 app.include_router(policy_brief.router)
+app.include_router(thaijo_router)
 app.include_router(test_ui.router)
 
 

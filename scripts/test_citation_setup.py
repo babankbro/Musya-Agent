@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import get_settings
 from src.db.pool import get_async_pool, query_db
 from src.db.minio_client import list_documents, download_document
-from src.rag.vector_store import get_collection
+from src.rag.vector_store import health_check, search_documents
 from src.schemas.evidence import EvidenceItem, Claim, ClaimEvidenceLink
 import asyncpg
 import logging
@@ -170,14 +170,12 @@ async def test_claim_evidence_link():
             await conn.execute(
                 """
                 INSERT INTO claim_evidence_link (
-                    claim_id, evidence_id, relevance_score, session_id
+                    claim_id, evidence_id, support_level, session_id
                 ) VALUES ($1, $2, $3, $4)
-                ON CONFLICT (claim_id, evidence_id) DO UPDATE SET
-                    relevance_score = EXCLUDED.relevance_score
                 """,
                 "TEST-CLAIM-001",
                 "TEST-EV-001",
-                0.95,
+                'strong',
                 "test-session-001"
             )
             logger.info("✅ Inserted claim-evidence link")
@@ -225,28 +223,23 @@ def test_minio_connection():
         return False
 
 
-def test_chromadb_connection():
-    """Test ChromaDB connection."""
+async def test_pgvector_connection():
+    """Test pgvector connection."""
     logger.info("\n" + "=" * 60)
-    logger.info("STEP 6: Testing ChromaDB Connection")
+    logger.info("STEP 6: Testing pgvector Connection")
     logger.info("=" * 60)
     
     try:
-        collection = get_collection()
-        count = collection.count()
-        logger.info(f"✅ ChromaDB connected. Collection has {count} chunks")
+        health_check()
+        logger.info("✅ pgvector connected (health_check passed)")
         
         # Try a sample search
-        if count > 0:
-            results = collection.query(
-                query_texts=["อุบัติเหตุ"],
-                n_results=3
-            )
-            logger.info(f"✅ Sample search returned {len(results['documents'][0])} results")
+        results = search_documents("อุบัติเหตุ", n_results=3)
+        logger.info(f"✅ Sample search returned {len(results)} results")
         
         return True
     except Exception as e:
-        logger.error(f"❌ ChromaDB connection failed: {e}")
+        logger.error(f"❌ pgvector connection failed: {e}")
         return False
 
 
@@ -277,21 +270,21 @@ async def verify_enhanced_metadata():
                 else:
                     logger.warning(f"⚠️  Column '{col}' missing (may need migration)")
             
-            # Check document_chunks
+            # Check document_embeddings
             chunks_columns = await conn.fetch(
                 """
                 SELECT column_name 
                 FROM information_schema.columns 
-                WHERE table_name = 'document_chunks'
+                WHERE table_name = 'document_embeddings'
                 """
             )
             
             chunks_column_names = [row['column_name'] for row in chunks_columns]
-            chunks_required = ['section_label', 'heading_text']
+            chunks_required = ['section_label']
             
             for col in chunks_required:
                 if col in chunks_column_names:
-                    logger.info(f"✅ Column '{col}' exists in document_chunks")
+                    logger.info(f"✅ Column '{col}' exists in document_embeddings")
                 else:
                     logger.warning(f"⚠️  Column '{col}' missing (may need migration)")
             
@@ -334,8 +327,8 @@ async def main():
     # Step 5: Test MinIO
     results['minio'] = test_minio_connection()
     
-    # Step 6: Test ChromaDB
-    results['chromadb'] = test_chromadb_connection()
+    # Step 6: Test pgvector
+    results['pgvector'] = await test_pgvector_connection()
     
     # Step 7: Verify enhanced metadata
     results['metadata'] = await verify_enhanced_metadata()

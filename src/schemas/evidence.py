@@ -6,7 +6,7 @@ from datetime import datetime
 class EvidenceItem(BaseModel):
     """Normalized evidence from any source (document, database, API)."""
     evidence_id: str = Field(..., description="Unique ID, e.g. EV-001")
-    evidence_type: str = Field(..., description="document | database | api")
+    evidence_type: str = Field(..., description="document | database | api | notebooklm_pdf | thaijo_article")
     topic: str = Field("general", description="accident | mental_health | nutrition")
 
     # Source identification
@@ -39,6 +39,12 @@ class EvidenceItem(BaseModel):
     apa_authors: str = Field("", description="Author/organization name for APA reference")
     apa_year: str = Field("", description="Publication year (พ.ศ. or ค.ศ.)")
     apa_publisher: str = Field("", description="Publisher or organization")
+
+    # ThaiJO-specific fields (only populated for thaijo_article evidence)
+    thaijo_pdf_url: str = Field("", description="Direct PDF URL on TCI-THAIJO portal")
+    thaijo_reference: str = Field("", description="Raw APA citation text extracted from TCI-THAIJO HTML (null-safe)")
+    thaijo_summary: str = Field("", description="AI-generated Thai summary of the PDF (from ThaiJO microservice)")
+    thaijo_search_term: str = Field("", description="Original search keyword used to find this article")
 
 
 class Claim(BaseModel):

@@ -1,6 +1,6 @@
 """Vector store backed by PostgreSQL + pgvector (replaces ChromaDB).
 
-Embeddings are generated via Google Gemini text-embedding-004 API (768-dim).
+Embeddings are generated via Google Gemini gemini-embedding-001 API (3072-dim).
 No local model download required — uses the existing GEMINI_API_KEY.
 """
 import logging
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _client: genai.Client | None = None
 _conn: Any | None = None
 
-_EMBEDDING_DIM = 768  # text-embedding-004 output dimension
+_EMBEDDING_DIM = 3072  # gemini-embedding-001 output dimension (matches vector(3072) in DB)
 
 
 def _get_client() -> genai.Client:
@@ -52,7 +52,7 @@ def _get_conn():
 
 
 def _embed(texts: list[str]) -> list[list[float]]:
-    """Embed a list of texts using Google Gemini text-embedding-004."""
+    """Embed a list of texts using Google Gemini gemini-embedding-001."""
     s = get_settings()
     client = _get_client()
     vectors = []
@@ -161,12 +161,10 @@ def search_documents(
 
     # Build optional WHERE filter (supports topic filter used by document_rag.search)
     extra_where = ""
-    params: list[Any] = [query_vec, collection, n_results]
     if where:
         conditions = []
-        for key, value in where.items():
+        for key in where:
             conditions.append(f"{key} = %s")
-            params.insert(-1, value)  # inject before LIMIT param
         extra_where = "AND " + " AND ".join(conditions)
 
     sql = f"""

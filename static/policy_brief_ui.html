@@ -100,6 +100,21 @@
     .quick-q { background:#f0fdfa; border:1px solid #99f6e4; color:#0f766e; padding:0.3rem 0.7rem;
                border-radius:9999px; font-size:0.75rem; cursor:pointer; transition:all 0.15s; }
     .quick-q:hover { background:#ccfbf1; }
+    .quick-q.short { background:#fff7ed; border-color:#fed7aa; color:#c2410c; }
+    .quick-q.short:hover { background:#ffedd5; }
+
+    /* Chat mode toggle */
+    .mode-toggle { display:flex; gap:4px; background:#f1f5f9; border-radius:9999px; padding:3px; }
+    .mode-btn { padding:0.25rem 0.75rem; border-radius:9999px; font-size:0.75rem; font-weight:600;
+                border:none; cursor:pointer; transition:all 0.2s; color:#64748b; background:transparent; }
+    .mode-btn.active-full { background:#0d9488; color:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.15); }
+    .mode-btn.active-short { background:#f97316; color:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.15); }
+    .mode-badge-full  { display:inline-flex; align-items:center; gap:4px; font-size:0.65rem;
+                        background:#f0fdfa; color:#0f766e; border:1px solid #99f6e4;
+                        padding:2px 8px; border-radius:9999px; font-weight:600; }
+    .mode-badge-short { display:inline-flex; align-items:center; gap:4px; font-size:0.65rem;
+                        background:#fff7ed; color:#c2410c; border:1px solid #fed7aa;
+                        padding:2px 8px; border-radius:9999px; font-weight:600; }
 
     /* Agent timeline in loading bubble */
     .agent-timeline { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
@@ -114,6 +129,63 @@
     .agent-step.waiting .name { color:#9ca3af; }
     .agent-step .time { color:#9ca3af; font-size:0.65rem; margin-left:auto; }
     .agent-step .msg  { color:#6b7280; font-size:0.65rem; }
+
+    /* ─── Inline citation tooltips ─── */
+    .citation-tooltip-wrapper {
+      position: relative;
+      display: inline;
+    }
+    .citation-inline {
+      color: #0d9488;
+      font-weight: 600;
+      font-size: 0.85em;
+      background: #f0fdfa;
+      padding: 0 3px;
+      border-radius: 3px;
+      border-bottom: 1px dashed #0d9488;
+    }
+    .citation-tooltip-wrapper:hover .citation-inline {
+      background: #ccfbf1;
+    }
+    .citation-tooltip {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e293b;
+      color: #f1f5f9;
+      font-size: 0.7rem;
+      line-height: 1.4;
+      padding: 8px 12px;
+      border-radius: 8px;
+      white-space: normal;
+      width: max-content;
+      max-width: 360px;
+      z-index: 50;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      margin-bottom: 6px;
+      pointer-events: none;
+    }
+    .citation-tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: #1e293b;
+    }
+    .citation-tooltip-wrapper:hover .citation-tooltip {
+      display: block;
+      pointer-events: auto;
+    }
+    .citation-tooltip-link {
+      color: #5eead4;
+      font-weight: 500;
+      margin-top: 4px;
+      display: inline-block;
+    }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -137,6 +209,7 @@
       <button onclick="switchTab('pipeline')" id="tab-pipeline" class="tab-btn text-sm px-3 py-1.5 rounded-lg font-medium text-gray-500 hover:bg-gray-100">Pipeline</button>
       <button onclick="switchTab('tools')"    id="tab-tools"    class="tab-btn text-sm px-3 py-1.5 rounded-lg font-medium text-gray-500 hover:bg-gray-100">Tools</button>
       <button onclick="switchTab('data')"     id="tab-data"     class="tab-btn text-sm px-3 py-1.5 rounded-lg font-medium text-gray-500 hover:bg-gray-100">Data</button>
+      <button onclick="switchTab('refs')"     id="tab-refs"     class="tab-btn text-sm px-3 py-1.5 rounded-lg font-medium text-gray-500 hover:bg-gray-100">📚 เอกสาร</button>
     </div>
   </div>
 </header>
@@ -146,14 +219,22 @@
 <!-- ========================= TAB 0: CHAT ========================= -->
 <div id="panel-chat" class="panel hidden" style="height:calc(100vh - 80px); display:none; flex-direction:column;">
 
-  <!-- Quick prompts -->
-  <div class="flex flex-wrap gap-2 px-1 pt-1 pb-3">
+  <!-- Quick prompts (mode-aware) -->
+  <div id="quick-prompts-full" class="flex flex-wrap gap-2 px-1 pt-1 pb-3">
     <button onclick="sendQuick('สถิติอุบัติเหตุจังหวัดอุบลราชธานี ปี 2024')" class="quick-q">สถิติอุบัติเหตุ อุบลฯ 2024</button>
     <button onclick="sendQuick('จุดเสี่ยงอุบัติเหตุ 10 อันดับแรก')" class="quick-q">จุดเสี่ยง 10 อันดับ</button>
     <button onclick="sendQuick('สร้าง policy brief สาธารณสุข จ.อุบลราชธานี เรื่อง RTI สุขภาพจิต และ NCD')" class="quick-q">Policy Brief อุบลฯ (RTI+MH+NCD)</button>
     <button onclick="sendQuick('วิเคราะห์เชิงนโยบาย สุขภาพจิต จ.ยโสธร')" class="quick-q">นโยบายสุขภาพจิต ยโสธร</button>
     <button onclick="sendQuick('แนวโน้มอุบัติเหตุรายปี เปรียบเทียบ 5 จังหวัดเขตสุขภาพที่ 10')" class="quick-q">แนวโน้ม เขต 10 (5 จังหวัด)</button>
     <button onclick="sendQuick('รายงานตรวจราชการ จ.ศรีสะเกษ ครอบคลุม RTI โภชนาการ และ NCDs')" class="quick-q">ตรวจราชการ ศรีสะเกษ</button>
+  </div>
+  <div id="quick-prompts-short" class="flex flex-wrap gap-2 px-1 pt-1 pb-3 hidden">
+    <button onclick="sendQuick('จุดเสี่ยงอุบัติเหตุในอุบลราชธานีมีที่ไหนบ้าง')" class="quick-q short">จุดเสี่ยงอุบลฯ?</button>
+    <button onclick="sendQuick('สถิติอุบัติเหตุปี 2024 ลดหรือเพิ่มขึ้น')" class="quick-q short">อุบัติเหตุ 2024 ลด/เพิ่ม?</button>
+    <button onclick="sendQuick('จังหวัดไหนในเขต 10 มีอุบัติเหตุมากที่สุด')" class="quick-q short">จังหวัดไหนอุบัติเหตุมากสุด?</button>
+    <button onclick="sendQuick('NCD ในมุกดาหารเป็นอย่างไรบ้าง')" class="quick-q short">NCD มุกดาหาร?</button>
+    <button onclick="sendQuick('สุขภาพจิตเขต 10 มีแนวโน้มอย่างไร')" class="quick-q short">แนวโน้มสุขภาพจิตเขต 10?</button>
+    <button onclick="sendQuick('ระบบนี้ทำอะไรได้บ้าง')" class="quick-q short">ระบบนี้ทำอะไรได้?</button>
   </div>
 
   <!-- Message list -->
@@ -164,11 +245,12 @@
         <span class="text-3xl">🤖</span>
       </div>
       <h2 class="text-lg font-semibold text-gray-700 mb-1">Musya Agent — Unified Chat</h2>
-      <p class="text-sm text-gray-400">ถามข้อมูลอุบัติเหตุ หรือขอ Policy Brief ระบบจะเลือก pipeline ให้อัตโนมัติ</p>
-      <div class="mt-3 flex justify-center gap-3 text-xs">
+      <p class="text-sm text-gray-400">เลือกโหมด แล้วถามข้อมูลอุบัติเหตุหรือขอ Policy Brief</p>
+      <div class="mt-3 flex justify-center gap-2 text-xs flex-wrap">
         <span class="bg-gray-100 text-gray-500 px-2 py-1 rounded-full">🔀 Auto-routing</span>
-        <span class="bg-teal-50 text-teal-600 px-2 py-1 rounded-full">📊 Chat Pipeline</span>
-        <span class="bg-emerald-50 text-emerald-600 px-2 py-1 rounded-full">📋 Policy Pipeline</span>
+        <span class="bg-teal-50 text-teal-600 px-2 py-1 rounded-full">📊 รายงานเต็ม ~3–5 นาที</span>
+        <span class="bg-emerald-50 text-emerald-600 px-2 py-1 rounded-full">📋 Policy Brief</span>
+        <span class="bg-orange-50 text-orange-600 px-2 py-1 rounded-full">💬 ถามสั้น ~30–60 วินาที</span>
       </div>
     </div>
   </div>
@@ -180,9 +262,18 @@
   </div>
 
   <!-- Input -->
-  <div class="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
+  <div id="chat-input-box" class="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
+    <!-- Mode toggle row -->
+    <div class="flex items-center justify-between mb-2">
+      <div class="mode-toggle">
+        <button id="mode-btn-full" class="mode-btn active-full" onclick="setChatMode('full')">📊 รายงานเต็ม</button>
+        <button id="mode-btn-short" class="mode-btn" onclick="setChatMode('short')">💬 ถามสั้น</button>
+      </div>
+      <span id="mode-hint" class="text-xs text-gray-400">~3–5 นาที · กราฟ + รายงานเชิงลึก</span>
+    </div>
     <div class="flex gap-2">
-      <textarea id="chat-input" rows="2" placeholder="ถามเกี่ยวกับข้อมูลอุบัติเหตุ หรือขอ Policy Brief เช่น 'สร้าง policy brief จ.อุบลราชธานี'..."
+      <textarea id="chat-input" rows="2"
+                placeholder="ถามเกี่ยวกับข้อมูลอุบัติเหตุ หรือขอ Policy Brief เช่น 'สร้าง policy brief จ.อุบลราชธานี'..."
                 class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-teal-300"
                 onkeydown="handleChatKey(event)"></textarea>
       <button id="chat-send-btn" onclick="sendChat()"
@@ -533,6 +624,63 @@
   </div>
 </div>
 
+<!-- ======================= TAB 5: REFERENCE LIBRARY =========== -->
+<div id="panel-refs" class="panel hidden">
+
+  <div class="bg-white rounded-xl border border-gray-200 p-5 mb-4 shadow-sm">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-base font-semibold text-gray-700">📚 คลังเอกสารอ้างอิง</h2>
+        <p class="text-xs text-gray-400">เอกสารทั้งหมดใน MinIO — คลิก 🔗 เพื่อเปิด PDF ในแท็บใหม่</p>
+      </div>
+      <button onclick="loadRefLibrary()" class="text-xs bg-teal-50 text-teal-600 hover:bg-teal-100 px-3 py-1.5 rounded-lg border border-teal-200">🔄 Refresh</button>
+    </div>
+
+    <!-- Search + Filter bar -->
+    <div class="flex gap-2 mb-4">
+      <input id="refs-search" type="text" placeholder="ค้นหาชื่อเอกสาร หรือ path..."
+             class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-300"
+             oninput="filterRefTable()">
+      <select id="refs-topic" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-300"
+              onchange="filterRefTable()">
+        <option value="">ทุกหัวข้อ</option>
+        <option value="accident">🚗 Accident</option>
+        <option value="mental_health">🧠 Mental Health</option>
+        <option value="nutrition">🍎 Nutrition</option>
+        <option value="general">📄 General</option>
+      </select>
+    </div>
+
+    <!-- Stats bar -->
+    <div class="flex gap-3 mb-4 text-xs">
+      <span class="bg-teal-50 text-teal-700 px-2.5 py-1 rounded-full">รวม: <span id="refs-total">—</span> เอกสาร</span>
+      <span class="bg-green-50 text-green-700 px-2.5 py-1 rounded-full">มี APA: <span id="refs-apa-count">—</span></span>
+      <span class="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full">มี PDF: <span id="refs-pdf-count">—</span></span>
+    </div>
+
+    <!-- Table -->
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="border-b border-gray-100 bg-gray-50">
+            <th class="text-left py-2 px-3 text-gray-500 font-medium w-8">#</th>
+            <th class="text-left py-2 px-3 text-gray-500 font-medium">APA Citation</th>
+            <th class="text-left py-2 px-3 text-gray-500 font-medium w-24">หัวข้อ</th>
+            <th class="text-left py-2 px-3 text-gray-500 font-medium w-16">ปี</th>
+            <th class="text-left py-2 px-3 text-gray-500 font-medium w-20">ชิ้นส่วน</th>
+            <th class="text-center py-2 px-3 text-gray-500 font-medium w-16">เปิด</th>
+          </tr>
+        </thead>
+        <tbody id="refs-table-body">
+          <tr><td colspan="6" class="py-8 text-center text-gray-400">กำลังโหลด...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p id="refs-empty" class="hidden text-center py-6 text-sm text-gray-400">ไม่พบเอกสารในฐานข้อมูล</p>
+  </div>
+
+</div>
+
 <!-- ======================= TAB 4: DATA ========================== -->
 <div id="panel-data" class="panel hidden">
 
@@ -629,6 +777,7 @@ const state = {
   activeResultTab:  'brief',
   chatHistory:      [],
   chatLoading:      false,
+  chatMode:         'full',   // 'full' = รายงานเต็ม | 'short' = ถามสั้น
 };
 
 // ── Tab switching ──────────────────────────────────────────────────────────
@@ -832,6 +981,9 @@ function renderPolicyBrief(data) {
   // Citations
   renderCitations(data.citations || []);
 
+  // Post-process inline [C-xxx] codes into tooltips in all content areas
+  postProcessInlineCitations();
+
   // Priority recommendations in brief tab
   document.getElementById('priority-recs').innerHTML = '';
   if (data.priority_recommendations?.length) {
@@ -908,29 +1060,76 @@ function renderCrossLinks(links) {
 }
 
 function renderCitations(citations) {
-  document.getElementById('citation-count').textContent = citations.length;
+  // Deduplicate by source_ref (keep first occurrence)
+  const seen = new Set();
+  const unique = citations.filter(c => {
+    const key = (c.source_ref || c.citation_code || '').trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  document.getElementById('citation-count').textContent = unique.length;
   const el = document.getElementById('citations-content');
-  if (!citations.length) {
+  if (!unique.length) {
     el.innerHTML = '<p class="text-sm text-gray-400 py-4 text-center">ไม่มีการอ้างอิง</p>';
     return;
   }
+  // Store citations globally for tooltip lookup
+  window._citationMap = {};
+  unique.forEach(c => { window._citationMap[c.citation_code] = c; });
+
   const srcIcon = {notebooklm_pdf:'📄', database:'🗄️', document:'📝'};
   const trustClass = {high:'bg-green-50 text-green-700', medium:'bg-yellow-50 text-yellow-700', low:'bg-red-50 text-red-700'};
-  el.innerHTML = citations.map(c => {
+  el.innerHTML = unique.map((c, i) => {
     const icon  = srcIcon[c.source_type] || '📎';
     const trust = (c.trust_level||'medium').toLowerCase();
     const tc    = trustClass[trust] || trustClass.medium;
-    return `<div class="flex items-start justify-between py-2 border-b border-gray-100">
-      <div class="flex items-start gap-2">
+    const bibText = c.bibliography_text || c.citation_text || c.source_ref || '';
+    const linkIcon = c.open_url
+      ? `<a href="${c.open_url}" target="_blank" rel="noopener" class="text-teal-500 hover:text-teal-700 ml-1 text-sm align-middle" title="เปิดเอกสารต้นฉบับในแท็บใหม่">�</a>`
+      : '';
+    return `<div class="flex items-start py-2.5 border-b border-gray-100">
+      <div class="flex items-start gap-2 min-w-0">
         <span class="font-mono text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded shrink-0">${escapeHtml(c.citation_code||'')}</span>
-        <div>
-          <p class="text-xs font-medium text-gray-700">${icon} ${escapeHtml(c.citation_text || c.source_ref || '')}</p>
+        <div class="min-w-0">
+          <p class="text-xs text-gray-700 leading-relaxed">${icon} ${escapeHtml(bibText)}${linkIcon}</p>
           <p class="text-xs text-gray-400 mt-0.5">${escapeHtml(c.source_type||'')} · <span class="${tc} text-xs px-1.5 py-0.5 rounded">${trust.toUpperCase()}</span></p>
         </div>
       </div>
-      ${c.open_url ? `<a href="${c.open_url}" target="_blank" class="text-xs text-teal-600 hover:underline shrink-0 ml-2">🔗 เปิด</a>` : ''}
     </div>`;
   }).join('');
+}
+
+function postProcessInlineCitations() {
+  // Replace [C-xxx] text in rendered content with interactive tooltip spans
+  const map = window._citationMap || {};
+  if (!Object.keys(map).length) return;
+
+  const containers = [
+    'brief-content', 'rti-content', 'mental-content', 'ncd-content', 'cross-content',
+  ];
+
+  containers.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Replace [C-xxx] patterns with tooltip spans
+    el.innerHTML = el.innerHTML.replace(/\[C-(\d{3})\]/g, (match, num) => {
+      const code = 'C-' + num;
+      const c = map[code];
+      if (!c) return match; // no match in citation map — leave as-is
+      const bib = escapeHtml(c.bibliography_text || c.citation_text || c.source_ref || code);
+      const url = c.open_url || '';
+      const clickAttr = url
+        ? `onclick="window.open('${url}','_blank')" style="cursor:pointer"`
+        : '';
+      return `<span class="citation-tooltip-wrapper" ${clickAttr}>` +
+        `<span class="citation-inline">[${code}]</span>` +
+        `<span class="citation-tooltip">${bib}` +
+        (url ? `<br><span class="citation-tooltip-link">📄 คลิกเปิด PDF</span>` : '') +
+        `</span></span>`;
+    });
+  });
 }
 
 function renderPriorityRecs(recs, containerId) {
@@ -1275,12 +1474,43 @@ function handleChatKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 }
 
+function setChatMode(mode) {
+  state.chatMode = mode;
+  const btnFull  = document.getElementById('mode-btn-full');
+  const btnShort = document.getElementById('mode-btn-short');
+  const hint     = document.getElementById('mode-hint');
+  const input    = document.getElementById('chat-input');
+  const qFull    = document.getElementById('quick-prompts-full');
+  const qShort   = document.getElementById('quick-prompts-short');
+  const sendBtn  = document.getElementById('chat-send-btn');
+
+  if (mode === 'full') {
+    btnFull.className  = 'mode-btn active-full';
+    btnShort.className = 'mode-btn';
+    hint.textContent   = '~3–5 นาที · กราฟ + รายงานเชิงลึก';
+    input.placeholder  = "ถามเกี่ยวกับข้อมูลอุบัติเหตุ หรือขอ Policy Brief เช่น 'สร้าง policy brief จ.อุบลราชธานี'...";
+    sendBtn.className  = 'px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg self-end transition-all';
+    qFull.classList.remove('hidden');
+    qShort.classList.add('hidden');
+  } else {
+    btnFull.className  = 'mode-btn';
+    btnShort.className = 'mode-btn active-short';
+    hint.textContent   = '~30–60 วินาที · คำตอบสั้น ไม่มีกราฟ';
+    input.placeholder  = "ถามสั้น ๆ เช่น 'จุดเสี่ยงอุบลฯ', 'อุบัติเหตุ 2024 ลดหรือเพิ่ม?'";
+    sendBtn.className  = 'px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg self-end transition-all';
+    qFull.classList.add('hidden');
+    qShort.classList.remove('hidden');
+  }
+}
+
 function sendQuick(text) {
   document.getElementById('chat-input').value = text;
   sendChat();
 }
 
 async function sendChat() {
+  if (state.chatMode === 'short') { sendShortChat(); return; }
+
   const input = document.getElementById('chat-input');
   const msg = input.value.trim();
   if (!msg || state.chatLoading) return;
@@ -1368,6 +1598,127 @@ async function sendChat() {
     btn.innerHTML = '➤ ส่ง';
     document.getElementById('chat-input').focus();
   }
+}
+
+async function sendShortChat() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg || state.chatLoading) return;
+
+  input.value = '';
+  state.chatLoading = true;
+  document.getElementById('chat-send-btn').disabled = true;
+  document.getElementById('chat-send-btn').innerHTML = '<span class="spin">⟳</span>';
+  document.getElementById('chat-status').textContent = 'กำลังค้นหา (ถามสั้น)...';
+  document.getElementById('chat-follow-ups').classList.add('hidden');
+  document.getElementById('chat-empty').style.display = 'none';
+
+  appendChatBubble('user', msg);
+
+  // Simple 3-dot loading bubble (no timeline for short chat)
+  const loadId = 'load-' + Date.now();
+  const scroll = document.getElementById('chat-scroll');
+  const loadEl = document.createElement('div');
+  loadEl.id = loadId;
+  loadEl.className = 'chat-bubble chat-msg';
+  loadEl.innerHTML = `
+    <div class="flex gap-2">
+      <div class="w-7 h-7 bg-gradient-to-br from-orange-400 to-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">M</div>
+      <div class="bg-white border border-orange-100 rounded-2xl rounded-tl-sm px-4 py-3">
+        <div class="flex items-center gap-2">
+          <span class="loading-dots text-orange-400 text-sm"><span>●</span> <span>●</span> <span>●</span></span>
+          <span class="text-xs text-gray-400">ถามสั้น — กำลังค้นหา...</span>
+        </div>
+      </div>
+    </div>`;
+  scroll.appendChild(loadEl);
+  scroll.scrollTop = scroll.scrollHeight;
+
+  const t0 = Date.now();
+
+  try {
+    const res = await fetch(BASE + '/api/chat/short', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg, session_id: null})
+    });
+
+    loadEl.remove();
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+    appendShortChatBubble(data, elapsed);
+    document.getElementById('chat-status').textContent = `ถามสั้น ตอบใน ${elapsed}s`;
+
+    // Show follow-ups if present
+    if (data.follow_up_questions?.length) {
+      const fuList = document.getElementById('chat-follow-ups-list');
+      fuList.innerHTML = '';
+      data.follow_up_questions.forEach(q => {
+        const btn = document.createElement('button');
+        btn.className = 'quick-q short';
+        btn.textContent = q;
+        btn.onclick = () => { setChatMode('short'); document.getElementById('chat-input').value = q; sendShortChat(); };
+        fuList.appendChild(btn);
+      });
+      document.getElementById('chat-follow-ups').classList.remove('hidden');
+    }
+
+  } catch(err) {
+    loadEl.remove();
+    appendChatBubble('error', '❌ Network error: ' + err);
+  } finally {
+    state.chatLoading = false;
+    const btn = document.getElementById('chat-send-btn');
+    btn.disabled = false;
+    btn.innerHTML = '➤ ส่ง';
+    document.getElementById('chat-input').focus();
+  }
+}
+
+function appendShortChatBubble(data, elapsed) {
+  const scroll = document.getElementById('chat-scroll');
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-bubble chat-msg';
+
+  // Build mini citations
+  const citations = data.citations || [];
+  let citeHtml = '';
+  if (citations.length) {
+    citeHtml = `<div class="mt-3 pt-2 border-t border-orange-100">
+      <p class="text-xs font-semibold text-orange-600 mb-1">📎 อ้างอิงเบื้องต้น (${citations.length} รายการ)</p>
+      <div class="space-y-0.5">` +
+      citations.slice(0, 5).map(c =>
+        `<p class="text-xs text-gray-500">[${c.code || '?'}] ${c.bibliography_text ? c.bibliography_text.substring(0, 120) + '…' : ''}</p>`
+      ).join('') +
+      `</div>
+      <p class="text-xs text-amber-600 mt-2 italic">⚠️ อ้างอิงเบื้องต้น — ใช้ "รายงานเต็ม" สำหรับ APA ที่ตรวจสอบแล้ว</p>
+    </div>`;
+  }
+
+  const contentHtml = data.content
+    ? `<div class="prose text-sm">${marked.parse(data.content)}</div>`
+    : '<p class="text-sm text-gray-400">ไม่มีข้อมูลที่ตอบได้</p>';
+
+  wrap.innerHTML = `
+    <div class="flex gap-2">
+      <div class="w-7 h-7 bg-gradient-to-br from-orange-400 to-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">M</div>
+      <div class="bg-white border border-orange-100 rounded-2xl rounded-tl-sm px-4 py-3 flex-1 min-w-0">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="mode-badge-short">💬 ถามสั้น</span>
+          <span class="text-xs text-gray-400">${elapsed}s</span>
+          <button onclick="this.closest('.chat-bubble').querySelector('.prose')?.closest('div')?.querySelector('*')?.parentElement?.innerText && navigator.clipboard.writeText(this.closest('.chat-bubble').querySelector('.prose')?.innerText||'')"
+                  class="msg-copy text-xs text-gray-400 hover:text-gray-600 ml-auto">📋</button>
+        </div>
+        ${contentHtml}
+        ${citeHtml}
+      </div>
+    </div>`;
+
+  scroll.appendChild(wrap);
+  scroll.scrollTop = scroll.scrollHeight;
 }
 
 function appendLoadingBubbleWithTimeline(id) {
@@ -1468,11 +1819,12 @@ function clearChat() {
         <span class="text-3xl">🤖</span>
       </div>
       <h2 class="text-lg font-semibold text-gray-700 mb-1">Musya Agent — Unified Chat</h2>
-      <p class="text-sm text-gray-400">ถามข้อมูลอุบัติเหตุ หรือขอ Policy Brief ระบบจะเลือก pipeline ให้อัตโนมัติ</p>
-      <div class="mt-3 flex justify-center gap-3 text-xs">
+      <p class="text-sm text-gray-400">เลือกโหมด แล้วถามข้อมูลอุบัติเหตุหรือขอ Policy Brief</p>
+      <div class="mt-3 flex justify-center gap-2 text-xs flex-wrap">
         <span class="bg-gray-100 text-gray-500 px-2 py-1 rounded-full">🔀 Auto-routing</span>
-        <span class="bg-teal-50 text-teal-600 px-2 py-1 rounded-full">📊 Chat Pipeline</span>
-        <span class="bg-emerald-50 text-emerald-600 px-2 py-1 rounded-full">📋 Policy Pipeline</span>
+        <span class="bg-teal-50 text-teal-600 px-2 py-1 rounded-full">📊 รายงานเต็ม ~3–5 นาที</span>
+        <span class="bg-emerald-50 text-emerald-600 px-2 py-1 rounded-full">📋 Policy Brief</span>
+        <span class="bg-orange-50 text-orange-600 px-2 py-1 rounded-full">💬 ถามสั้น ~30–60 วินาที</span>
       </div>
     </div>`;
   document.getElementById('chat-follow-ups').classList.add('hidden');
@@ -1513,6 +1865,68 @@ function appendChatBubble(role, text, id, unifiedData) {
 
   scroll.appendChild(wrap);
   scroll.scrollTop = scroll.scrollHeight;
+
+  // Post-process [C-xxx] inline citations in chat pipeline bubble
+  // citeMap was fully enriched in buildAgentBubble (result.citations + markdown parse + _refDocs)
+  if (unifiedData && unifiedData.pipeline_used !== 'policy_brief_pipeline') {
+    const inner = wrap.querySelector('[data-inner]');
+    if (inner) {
+      let citeMap = {};
+      try { citeMap = JSON.parse(inner.dataset.citeMap || '{}'); } catch(e) {}
+      inner.innerHTML = inner.innerHTML.replace(/\[C-(\d{3})\]/g, (match, num) => {
+        const code = 'C-' + num;
+        const c = citeMap[code];
+        if (!c) return match;
+        const bib = escapeHtml(c.bibliography_text || c.citation_text || c.source_ref || code);
+        const url = c.open_url || '';
+        const clickAttr = url ? `onclick="window.open('${url}','_blank')" style="cursor:pointer"` : '';
+        return `<span class="citation-tooltip-wrapper" ${clickAttr}>` +
+          `<span class="citation-inline">[${code}]</span>` +
+          `<span class="citation-tooltip">${bib}` +
+          (url ? `<br><a href="${url}" target="_blank" rel="noopener" class="citation-tooltip-link">🔗 เปิดเอกสาร PDF</a>` : '') +
+          `</span></span>`;
+      });
+    }
+  }
+
+  // Post-process [C-xxx] in policy brief bubble domain sections
+  // _bubbleCiteMap is embedded in data-bubble-cite-map attribute
+  if (unifiedData && unifiedData.pipeline_used === 'policy_brief_pipeline') {
+    const citeMapEl = wrap.querySelector('[data-bubble-cite-map]');
+    let localMap = {};
+    if (citeMapEl) {
+      try { localMap = JSON.parse(citeMapEl.dataset.bubbleCiteMap || '{}'); } catch(e) {}
+    }
+    // Process all domain section divs + citation tab
+    wrap.querySelectorAll('[id$="-sec-rti"],[id$="-sec-mental"],[id$="-sec-ncd"],[id$="-sec-cross"],[id$="-sec-brief"],[id$="-sec-cite"]').forEach(sec => {
+      sec.innerHTML = sec.innerHTML.replace(/\[C-(\d{3})\]/g, (match, num) => {
+        const code = 'C-' + num;
+        const c = localMap[code];
+        if (!c) return match;
+        const bib = escapeHtml(c.bibliography_text || c.citation_text || c.source_ref || code);
+        const url = c.open_url || '';
+        const clickAttr = url ? `onclick="window.open('${url}','_blank')" style="cursor:pointer"` : '';
+        return `<span class="citation-tooltip-wrapper" ${clickAttr}>` +
+          `<span class="citation-inline">[${code}]</span>` +
+          `<span class="citation-tooltip">${bib}` +
+          (url ? `<br><a href="${url}" target="_blank" rel="noopener" class="citation-tooltip-link">🔗 เปิดเอกสาร PDF</a>` : '') +
+          `</span></span>`;
+      });
+      // Also append 🔗 inline after reference-list lines ending with [C-xxx]
+      // Pattern: "...APA text... [C-xxx]" — add link after the span
+      sec.innerHTML = sec.innerHTML.replace(
+        /(<span class="citation-tooltip-wrapper"[^>]*>.*?<\/span><\/span>)(?=\s*(?:<\/p>|<\/li>|<br|\n|$))/g,
+        (match, citSpan) => {
+          const codeM = citSpan.match(/citation-inline">\[([^\]]+)\]/);
+          const code2 = codeM ? codeM[1] : '';
+          const c2 = localMap[code2];
+          const url2 = c2 && c2.open_url ? c2.open_url : '';
+          if (!url2) return match;
+          return match + ` <a href="${url2}" target="_blank" rel="noopener" class="text-teal-500 hover:text-teal-700 align-middle" title="เปิดเอกสารต้นฉบับ">🔗</a>`;
+        }
+      );
+    });
+  }
 
   // Inject charts into chat_pipeline bubble via data-inner
   if (unifiedData && unifiedData.pipeline_used !== 'policy_brief_pipeline') {
@@ -1566,8 +1980,59 @@ function buildAgentBubble(data) {
     if (sections.ncd)    tabs.push({key:'ncd',    icon:'🍎', label:'NCD'});
     const crossLinks = result.cross_topic_links || [];
     const citations  = result.citations || [];
+
+    // ── Build _bubbleCiteMap: 3-step enrichment ──
+    // Step 1: seed from result.citations
+    const _bubbleCiteMap = {};
+    citations.forEach(c => { if (c.citation_code) _bubbleCiteMap[c.citation_code] = c; });
+
+    // Step 2: parse [C-xxx] reference lines from all section text
+    // Handles "[C-200] APA text" (code first) and "APA text [C-200]" (code last)
+    const _allSecText = Object.values(sections).join('\n') + '\n' + (result.policy_brief || '');
+    const _pbReFwd = /^\[C-(\d{3})\]\s+(.{10,})/gm;
+    const _pbReRev = /^(.{10,})\s+\[C-(\d{3})\]\s*$/gm;
+    let _rm;
+    while ((_rm = _pbReFwd.exec(_allSecText)) !== null) {
+      const code = 'C-' + _rm[1], apa = _rm[2].trim().slice(0, 300);
+      if (!_bubbleCiteMap[code])
+        _bubbleCiteMap[code] = {citation_code:code, source_type:'document', source_ref:'', citation_text:'', bibliography_text:apa, open_url:''};
+      else if (!_bubbleCiteMap[code].bibliography_text)
+        _bubbleCiteMap[code].bibliography_text = apa;
+    }
+    while ((_rm = _pbReRev.exec(_allSecText)) !== null) {
+      const code = 'C-' + _rm[2], apa = _rm[1].trim().slice(0, 300);
+      if (!_bubbleCiteMap[code])
+        _bubbleCiteMap[code] = {citation_code:code, source_type:'document', source_ref:'', citation_text:'', bibliography_text:apa, open_url:''};
+      else if (!_bubbleCiteMap[code].bibliography_text)
+        _bubbleCiteMap[code].bibliography_text = apa;
+    }
+
+    // Step 3: enrich open_url from _refDocs — match by title OR apa_authors first word
+    Object.values(_bubbleCiteMap).forEach(c => {
+      if (c.open_url) return;
+      const bib = (c.bibliography_text || '').toLowerCase();
+      if (!bib || !_refDocs.length) return;
+      // Extract first word of the bib text (LLM-generated author or title)
+      const bibFirstWord = bib.replace(/[^ก-๙a-z0-9]/g,' ').trim().split(/\s+/)[0] || '';
+      const hit = _refDocs.find(d => {
+        // Match by first word of document title
+        const t = (d.title || '').toLowerCase();
+        const titleFw = t.replace(/[^ก-๙a-z0-9\s]/g,'').trim().split(/\s+/)[0] || '';
+        if (titleFw.length >= 4 && bib.includes(titleFw)) return true;
+        // Match by first word of apa_authors against bib text
+        const a = ((d.apa && d.apa.authors) || '').toLowerCase();
+        const authorFw = a.replace(/[^ก-๙a-z0-9\s]/g,' ').trim().split(/\s+/)[0] || '';
+        if (authorFw.length >= 4 && bib.includes(authorFw)) return true;
+        // Match by bib first word against apa_authors
+        return bibFirstWord.length >= 4 && a.includes(bibFirstWord);
+      });
+      if (hit && hit.open_url) c.open_url = hit.open_url;
+    });
+
+    const _pbCiteEntries = Object.values(_bubbleCiteMap).filter(c => c.bibliography_text || c.citation_text);
+
     if (crossLinks.length) tabs.push({key:'cross', icon:'🔗', label:'Cross'});
-    if (citations.length)  tabs.push({key:'cite',  icon:'🔖', label:'อ้างอิง'});
+    if (_pbCiteEntries.length) tabs.push({key:'cite', icon:'🔖', label:'อ้างอิง'});
 
     const tabNav = tabs.map((t,i) =>
       `<button onclick="bubbleTab('${bubbleId}','${t.key}')" id="${bubbleId}-tab-${t.key}"
@@ -1594,15 +2059,21 @@ function buildAgentBubble(data) {
     }
 
     let citeHtml = '';
-    if (citations.length) {
-      const srcIcon = {notebooklm_pdf:'📄', database:'🗄️', document:'📝'};
+    if (_pbCiteEntries.length) {
+      const srcIcon2 = {notebooklm_pdf:'📄', database:'🗄️', document:'📝'};
       citeHtml = `<div id="${bubbleId}-sec-cite" class="hidden space-y-1">${
-        citations.map(c =>
-          `<div class="flex gap-2 py-1 border-b border-gray-100 text-xs">
-            <span class="font-mono bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded">${escapeHtml(c.citation_code||'')}</span>
-            <span class="text-gray-600">${srcIcon[c.source_type]||'📎'} ${escapeHtml(c.citation_text||c.source_ref||'')}</span>
-          </div>`
-        ).join('')
+        _pbCiteEntries.map(c => {
+          const bibText = c.bibliography_text || c.citation_text || c.source_ref || '';
+          const linkIcon = c.open_url
+            ? ` <a href="${c.open_url}" target="_blank" rel="noopener"
+                class="text-teal-500 hover:text-teal-700 ml-0.5 align-middle"
+                title="เปิดเอกสารต้นฉบับในแท็บใหม่">🔗</a>`
+            : '';
+          return `<div class="flex gap-2 py-1.5 border-b border-gray-100 text-xs items-start">
+            <span class="font-mono bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded shrink-0">${escapeHtml(c.citation_code||'')}</span>
+            <span class="text-gray-600 min-w-0 leading-relaxed">${srcIcon2[c.source_type]||'📎'} ${escapeHtml(bibText)}${linkIcon}</span>
+          </div>`;
+        }).join('')
       }</div>`;
     }
 
@@ -1610,6 +2081,7 @@ function buildAgentBubble(data) {
     _bubbleReports[bubbleId] = result.policy_brief || Object.values(sections).join('\n\n---\n\n');
 
     body = `
+      <div data-bubble-cite-map='${JSON.stringify(_bubbleCiteMap).replace(/'/g,"&#39;")}' style="display:none"></div>
       <div class="text-xs text-gray-500 mb-2 flex items-center gap-2">
         <span class="font-medium text-gray-700">📋 ${escapeHtml(province)}</span>
         <span>⏱ ${elapsed.toFixed(1)}s</span>
@@ -1619,22 +2091,99 @@ function buildAgentBubble(data) {
       ${domainContent}${crossHtml}${citeHtml}`;
   } else {
     // Chat pipeline — render markdown content with data-inner for chart injection
-    const content = result.content || result.policy_brief || JSON.stringify(result).slice(0, 2000);
+    const content  = result.content || result.policy_brief || JSON.stringify(result).slice(0, 2000);
     const elapsed  = result.metadata?.elapsed_seconds || 0;
     const topic    = result.topic || '';
     const agents   = result.metadata?.agent_count || 0;
     const chartCnt = (result.charts || []).length;
+    const chatCitations = result.citations || [];
+
+    // ── Step 1: seed map from result.citations (may be empty) ──
+    const _chatCiteMap = {};
+    chatCitations.forEach(c => {
+      if (c.citation_code) _chatCiteMap[c.citation_code] = c;
+    });
+
+    // ── Step 2: parse [C-xxx] reference-list lines from the raw markdown ──
+    // The LLM writes lines like: "[C-002] Author. (Year). Title. Publisher."
+    // Extract them so we can add 🔗 links even when result.citations is empty.
+    const refLineRe = /^\[C-(\d{3})\]\s+(.{10,})/gm;
+    let rlm;
+    while ((rlm = refLineRe.exec(content)) !== null) {
+      const code = 'C-' + rlm[1];
+      const apa  = rlm[2].trim().slice(0, 300);
+      if (!_chatCiteMap[code]) {
+        // No entry from result.citations — create one from the text
+        _chatCiteMap[code] = {
+          citation_code: code,
+          source_type: 'document',
+          source_ref: '',
+          citation_text: '',
+          bibliography_text: apa,
+          open_url: '',
+        };
+      } else if (!_chatCiteMap[code].bibliography_text) {
+        _chatCiteMap[code].bibliography_text = apa;
+      }
+    }
+
+    // ── Step 3: enrich open_url from _refDocs — match by title OR apa_authors first word ──
+    Object.values(_chatCiteMap).forEach(c => {
+      if (c.open_url) return;
+      const bib = (c.bibliography_text || '').toLowerCase();
+      if (!bib || !_refDocs.length) return;
+      const bibFirstWord = bib.replace(/[^ก-๙a-z0-9]/g,' ').trim().split(/\s+/)[0] || '';
+      const hit = _refDocs.find(d => {
+        // Match by first word of document title
+        const t = (d.title || '').toLowerCase();
+        const titleFw = t.replace(/[^ก-๙a-z0-9\s]/g,'').trim().split(/\s+/)[0] || '';
+        if (titleFw.length >= 4 && bib.includes(titleFw)) return true;
+        // Match by first word of apa_authors against bib text
+        const a = ((d.apa && d.apa.authors) || '').toLowerCase();
+        const authorFw = a.replace(/[^ก-๙a-z0-9\s]/g,' ').trim().split(/\s+/)[0] || '';
+        if (authorFw.length >= 4 && bib.includes(authorFw)) return true;
+        // Match by bib first word against apa_authors
+        return bibFirstWord.length >= 4 && a.includes(bibFirstWord);
+      });
+      if (hit && hit.open_url) c.open_url = hit.open_url;
+    });
+
+    // ── Step 4: render bibliography section ──
+    const citEntries = Object.values(_chatCiteMap).filter(c => c.bibliography_text || c.citation_text);
+    let chatCiteHtml = '';
+    if (citEntries.length) {
+      const srcIcon = {notebooklm_pdf:'📄', database:'🗄️', document:'📝'};
+      chatCiteHtml = `<div class="mt-3 pt-3 border-t border-gray-100">
+        <p class="text-xs font-semibold text-gray-500 mb-2">🔖 เอกสารอ้างอิง (${citEntries.length} รายการ)</p>
+        <div class="space-y-1">${
+          citEntries.map(c => {
+            const bib = escapeHtml(c.bibliography_text || c.citation_text || c.source_ref || '');
+            const linkIcon = c.open_url
+              ? ` <a href="${c.open_url}" target="_blank" rel="noopener"
+                  class="text-teal-500 hover:text-teal-700 ml-0.5 align-middle"
+                  title="เปิดเอกสารต้นฉบับในแท็บใหม่">🔗</a>`
+              : '';
+            return `<div class="flex gap-2 py-1 border-b border-gray-50 text-xs items-start">
+              <span class="font-mono bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded shrink-0 mt-0.5">${escapeHtml(c.citation_code||'')}</span>
+              <span class="text-gray-600 leading-relaxed">${srcIcon[c.source_type]||'📎'} ${bib}${linkIcon}</span>
+            </div>`;
+          }).join('')
+        }</div></div>`;
+    }
+
     const metaHtml = `
       <div class="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-3 text-[10px] text-gray-400">
-        ${topic ? `<span>� ${escapeHtml(topic)}</span>` : ''}
+        ${topic ? `<span>📊 ${escapeHtml(topic)}</span>` : ''}
         ${elapsed ? `<span>⏱ ${elapsed.toFixed(1)}s</span>` : ''}
         ${agents  ? `<span>🤖 ${agents} agents</span>` : ''}
         ${chartCnt ? `<span>📊 ${chartCnt} chart${chartCnt>1?'s':''}</span>` : ''}
       </div>`;
     body = `
-      <div data-inner class="prose text-sm text-gray-700 max-h-[640px] overflow-y-auto">
+      <div data-inner data-cite-map='${JSON.stringify(_chatCiteMap).replace(/'/g, "&#39;")}'
+           class="prose text-sm text-gray-700 max-h-[640px] overflow-y-auto">
         ${marked.parse(content)}
       </div>
+      ${chatCiteHtml}
       ${metaHtml}`;
   }
 
@@ -1676,12 +2225,121 @@ function copyBubbleReport(bubbleId) {
   });
 }
 
+// ── Reference Library ────────────────────────────────────────────────────
+let _refDocs = [];
+
+async function loadRefLibrary() {
+  const tbody = document.getElementById('refs-table-body');
+  tbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-gray-400"><span class="spin inline-block">⟳</span> กำลังโหลด...</td></tr>';
+  document.getElementById('refs-total').textContent = '—';
+  document.getElementById('refs-apa-count').textContent = '—';
+  document.getElementById('refs-pdf-count').textContent = '—';
+
+  try {
+    const res = await fetch(BASE + '/api/documents/registry');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    _refDocs = data.documents || [];
+    renderRefTable(_refDocs);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-red-400">โหลดไม่ได้: ${err.message}</td></tr>`;
+  }
+}
+
+function filterRefTable() {
+  const q = (document.getElementById('refs-search').value || '').toLowerCase();
+  const t = document.getElementById('refs-topic').value;
+  const filtered = _refDocs.filter(d => {
+    const matchTopic = !t || d.topic === t;
+    const matchSearch = !q ||
+      (d.title || '').toLowerCase().includes(q) ||
+      (d.file_path || '').toLowerCase().includes(q) ||
+      (d.apa_citation || '').toLowerCase().includes(q);
+    return matchTopic && matchSearch;
+  });
+  renderRefTable(filtered);
+}
+
+const _TOPIC_COLORS = {
+  accident:     'bg-red-50 text-red-700',
+  mental_health:'bg-amber-50 text-amber-700',
+  nutrition:    'bg-emerald-50 text-emerald-700',
+  general:      'bg-gray-100 text-gray-600',
+};
+const _TOPIC_LABELS = {
+  accident:     '🚗 RTI',
+  mental_health:'🧠 MH',
+  nutrition:    '🍎 NCD',
+  general:      '📄 ทั่วไป',
+};
+
+function renderRefTable(docs) {
+  const tbody = document.getElementById('refs-table-body');
+  const empty = document.getElementById('refs-empty');
+
+  const apaCount = docs.filter(d => d.apa_citation && d.apa_citation.length > 5).length;
+  const pdfCount = docs.filter(d => d.open_url).length;
+  document.getElementById('refs-total').textContent = docs.length;
+  document.getElementById('refs-apa-count').textContent = apaCount;
+  document.getElementById('refs-pdf-count').textContent = pdfCount;
+
+  if (!docs.length) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  const topicGroup = {};
+  docs.forEach(d => {
+    const t = d.topic || 'general';
+    if (!topicGroup[t]) topicGroup[t] = [];
+    topicGroup[t].push(d);
+  });
+
+  let html = '';
+  let idx = 1;
+  Object.entries(topicGroup).forEach(([topic, group]) => {
+    const topicLabel = _TOPIC_LABELS[topic] || topic;
+    html += `<tr class="bg-gray-50"><td colspan="6" class="py-1.5 px-3 font-semibold text-xs text-gray-500 uppercase tracking-wide">${topicLabel}</td></tr>`;
+    group.forEach(d => {
+      const tc = _TOPIC_COLORS[d.topic] || _TOPIC_COLORS.general;
+      const apa = escapeHtml(d.apa_citation || d.title || d.file_path || '—');
+      const year = escapeHtml(d.apa?.year || '');
+      const chunks = d.chunk_count > 0
+        ? `<span class="text-green-600">${d.chunk_count} chunk</span>`
+        : `<span class="text-gray-300">—</span>`;
+      const ext = (d.file_path || '').split('.').pop().toLowerCase();
+      const fileIcon = ext === 'pdf' ? '📄' : ext === 'txt' ? '📝' : ext === 'docx' ? '📋' : '📁';
+      const openBtn = d.open_url
+        ? `<a href="${d.open_url}" target="_blank" rel="noopener"
+              class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-600 hover:text-teal-800 transition-all"
+              title="เปิด ${escapeHtml(d.title || d.file_path || '')} ในแท็บใหม่">${fileIcon}</a>`
+        : `<span class="text-gray-200 text-lg">—</span>`;
+      html += `
+        <tr class="border-b border-gray-50 hover:bg-teal-50 transition-colors">
+          <td class="py-2 px-3 text-gray-300 font-mono">${idx++}</td>
+          <td class="py-2 px-3">
+            <p class="text-gray-700 leading-relaxed">${apa}</p>
+            <p class="text-gray-400 mt-0.5 font-mono">${escapeHtml(d.file_path || '')}</p>
+          </td>
+          <td class="py-2 px-3"><span class="${tc} text-xs px-1.5 py-0.5 rounded">${_TOPIC_LABELS[d.topic] || d.topic}</span></td>
+          <td class="py-2 px-3 text-gray-500">${year}</td>
+          <td class="py-2 px-3">${chunks}</td>
+          <td class="py-2 px-3 text-center">${openBtn}</td>
+        </tr>`;
+    });
+  });
+  tbody.innerHTML = html;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   checkHealth();
   setInterval(checkHealth, 30000);
   loadSourcesTable();
   loadDBStats();
+  loadRefLibrary();
   marked.setOptions({ breaks: true, gfm: true });
   switchTab('chat');
 });

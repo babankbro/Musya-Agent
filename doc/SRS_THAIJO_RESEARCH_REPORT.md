@@ -1,0 +1,980 @@
+# เอกสารข้อกำหนดความต้องการซอฟต์แวร์ (SRS)
+# ระบบ ThaiJO Research Report — สร้างรายงานวิจัยจากบทความวิชาการ ThaiJO
+
+> **เวอร์ชัน**: 1.0  
+> **วันที่**: 2026-04-16  
+> **มาตรฐานอ้างอิง**: IEEE 830-1998  
+> **ขอบเขต**: ThaiJO Research Report pipeline — ค้นหา สังเคราะห์ สร้างรายงานจากบทความวิชาการ TCI-THAIJO  
+> **เอกสารที่เกี่ยวข้อง**: `THAIJO_AGENT_IMPLEMENTATION.md`, `AGENT_WORKFLOW_UNIFIED.md`, `ARCHITECTURE.md`
+
+---
+
+## 1. บทนำ
+
+### 1.1 วัตถุประสงค์ของเอกสาร
+เอกสารฉบับนี้ระบุข้อกำหนดความต้องการซอฟต์แวร์สำหรับฟีเจอร์ **ThaiJO Research Report** ซึ่งเป็นระบบสร้างรายงานสังเคราะห์งานวิจัย (Research Synthesis Report) จากบทความวิชาการไทยใน TCI-THAIJO โดยอัตโนมัติ
+
+### 1.2 ขอบเขตของระบบ
+**ชื่อฟีเจอร์**: ThaiJO Research Report Pipeline  
+**จุดมุ่งหมาย**: ให้ผู้ใช้ระบุหัวข้อวิจัย → ระบบค้นหาบทความวิชาการจาก TCI-THAIJO → สังเคราะห์เป็นรายงานวิจัยภาษาไทยที่มีการอ้างอิง APA 7th Edition → พร้อม visualization และ bibliography
+
+**ระบบจะทำสิ่งต่อไปนี้**:
+- ค้นหาบทความวิชาการจาก TCI-THAIJO ตามหัวข้อที่ผู้ใช้ระบุ
+- วิเคราะห์ความเกี่ยวข้องและคัดเลือกบทความที่เหมาะสม
+- สังเคราะห์เนื้อหาจากหลายบทความเป็นรายงาน Literature Review
+- สร้าง APA 7th Edition citations พร้อม open_url ไปยังบทความต้นฉบับ
+- สร้าง visualization (charts/tables) สรุปข้อค้นพบ
+- แนะนำคำถามวิจัยเพิ่มเติม (follow-up research questions)
+
+**ระบบจะไม่ทำสิ่งต่อไปนี้**:
+- ไม่สร้างเนื้อหาวิจัยใหม่ (ไม่ใช่ AI ที่ทำวิจัย)
+- ไม่ให้คะแนนคุณภาพวารสาร (journal ranking)
+- ไม่ดาวน์โหลดหรือเก็บ PDF ต้นฉบับในระบบ (ใช้ link ไปยัง TCI-THAIJO)
+- ไม่ประเมินความถูกต้องทางสถิติของบทความ
+
+### 1.3 คำจำกัดความและคำย่อ
+
+| คำย่อ | ความหมาย |
+|-------|---------|
+| **TCI-THAIJO** | Thai Journals Online — ฐานข้อมูลวารสารวิชาการไทย (tci-thaijo.org) |
+| **ThaiJO Microservice** | FastAPI service (port 8505) ที่ค้นหาและสรุปบทความ TCI-THAIJO |
+| **Literature Review** | การทบทวนวรรณกรรมวิจัย — สรุปและวิเคราะห์งานวิจัยที่เกี่ยวข้อง |
+| **Research Synthesis** | การสังเคราะห์งานวิจัย — หาข้อสรุปร่วมจากหลายบทความ |
+| **APA 7th** | American Psychological Association 7th Edition — มาตรฐานการอ้างอิง |
+| **C-200~C-299** | Citation code range สำหรับ ThaiJO articles ในระบบ Musya |
+| **EvidenceItem** | Pydantic model สำหรับหลักฐาน 1 ชิ้นในระบบ citation |
+| **ChartSpec** | JSON format สำหรับ Chart.js rendering |
+| **SSE** | Server-Sent Events — streaming จาก server ไป client |
+
+### 1.4 เอกสารอ้างอิง
+- `Agent/doc/THAIJO_AGENT_IMPLEMENTATION.md` — การเชื่อมต่อ ThaiJO กับ Agent pipeline
+- `Agent/doc/AGENT_WORKFLOW_UNIFIED.md` — workflow ของ agent pipeline ทั้งหมด
+- `Agent/doc/CITATION_EVIDENCE_GUIDE.md` — คู่มือระบบ Citation & Evidence
+- `Agent/doc/CITATION_APA_FORMAT.md` — รูปแบบ APA 7th Edition
+- https://github.com/tao-thewarat/thaijo — ThaiJO Microservice repository
+
+---
+
+## 2. คำอธิบายทั่วไป
+
+### 2.1 มุมมองผลิตภัณฑ์
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                      Frontend (Chat- / ChatV1)                      │
+│                      Next.js — port 3000                            │
+│                                                                     │
+│  [ThaiJO Research Tab]  หรือ  Chat Input: "ทบทวนงานวิจัยเรื่อง..." │
+└───────────────────────────┬─────────────────────────────────────────┘
+                            │  POST /api/thaijo/research
+                            │  POST /api/chat/unified (auto-detect)
+                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    Musya Agent Backend (port 8000)                   │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │        ThaiJO Research Report Pipeline (NEW)                  │  │
+│  │                                                               │  │
+│  │  Agent 0: Research Topic Parser                               │  │
+│  │     ↓                                                         │  │
+│  │  Agent 1: ThaiJO Multi-Query Searcher                         │  │
+│  │     ↓                                                         │  │
+│  │  Agent 2: Article Relevance Screener                          │  │
+│  │     ↓                                                         │  │
+│  │  Agent 3: Citation & Evidence Generator                       │  │
+│  │     ↓                                                         │  │
+│  │  Agent 4: Research Synthesizer                                │  │
+│  │     ↓                                                         │  │
+│  │  Agent 5: Research Report Composer                            │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌──────────┐   ┌──────────┐   ┌──────────────────────────────┐   │
+│  │PostgreSQL│   │ pgvector │   │ ThaiJO Microservice (:8505)  │   │
+│  │(evidence)│   │(doc RAG) │   │ TCI-THAIJO → AI Summary      │   │
+│  └──────────┘   └──────────┘   └──────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 ฟังก์ชันหลัก
+
+```
+User: "ทบทวนงานวิจัยเกี่ยวกับปัจจัยเสี่ยงอุบัติเหตุทางถนนในประเทศไทย"
+  │
+  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  1. PARSE TOPIC                                                  │
+│     → Main topic: "ปัจจัยเสี่ยงอุบัติเหตุทางถนน"                 │
+│     → Sub-queries: ["ปัจจัยเสี่ยง อุบัติเหตุ ถนน",              │
+│                      "พฤติกรรมเสี่ยง ขับรถ",                      │
+│                      "ดื่มแล้วขับ อุบัติเหตุ",                     │
+│                      "หมวกนิรภัย มอเตอร์ไซค์"]                    │
+│     → Domain: "road_traffic_injury"                               │
+│     → Scope: Thailand                                             │
+├─────────────────────────────────────────────────────────────────┤
+│  2. SEARCH THAIJO (Multi-query)                                  │
+│     → Query 1: search_thaijo("ปัจจัยเสี่ยง อุบัติเหตุ ถนน", 5) │
+│     → Query 2: search_thaijo("พฤติกรรมเสี่ยง ขับรถ", 5)        │
+│     → Query 3: search_thaijo("ดื่มแล้วขับ อุบัติเหตุ", 3)      │
+│     → Query 4: search_thaijo("หมวกนิรภัย มอเตอร์ไซค์", 3)     │
+│     → Raw results: 16 articles (may include duplicates)          │
+├─────────────────────────────────────────────────────────────────┤
+│  3. SCREEN & DEDUPLICATE                                         │
+│     → Remove duplicates (same pdf_url)                           │
+│     → Score relevance (0-10) per article                         │
+│     → Filter: relevance ≥ 6                                     │
+│     → Sort by relevance descending                               │
+│     → Selected: 8-12 unique articles                             │
+├─────────────────────────────────────────────────────────────────┤
+│  4. GENERATE CITATIONS                                           │
+│     → C-200: Article 1 (reference + pdf_url)                    │
+│     → C-201: Article 2 ...                                       │
+│     → Register in evidence_registry                              │
+│     → Map claims to evidence                                     │
+├─────────────────────────────────────────────────────────────────┤
+│  5. SYNTHESIZE RESEARCH                                          │
+│     → Theme 1: "ปัจจัยด้านพฤติกรรม" (3 articles)               │
+│     → Theme 2: "ปัจจัยด้านสิ่งแวดล้อม" (2 articles)            │
+│     → Theme 3: "ปัจจัยด้านนโยบาย" (3 articles)                 │
+│     → Research gaps identified                                   │
+│     → Contradictions noted                                       │
+├─────────────────────────────────────────────────────────────────┤
+│  6. COMPOSE REPORT                                               │
+│     → Literature Review report (1,500-3,000 words)              │
+│     → APA bibliography (8-12 references)                         │
+│     → Summary table of articles                                  │
+│     → Thematic analysis chart                                    │
+│     → 3 follow-up research questions                             │
+└─────────────────────────────────────────────────────────────────┘
+  │
+  ▼
+ThaiJOResearchResponse {
+  content: "## การทบทวนวรรณกรรม\n...",
+  articles_found: 16,
+  articles_selected: 10,
+  charts: [ThemeDistributionChart, YearTrendChart],
+  tables: [ArticleSummaryTable],
+  citations: [C-200, C-201, ..., C-209],
+  bibliography: ["APA ref 1", "APA ref 2", ...],
+  follow_ups: ["research question 1", ...],
+  metadata: { elapsed_seconds, search_queries, coverage_score }
+}
+```
+
+### 2.3 ลักษณะผู้ใช้งาน
+
+| ผู้ใช้ | คุณสมบัติ | การใช้งาน |
+|-------|---------|---------|
+| **นักวิจัยด้านสาธารณสุข** | คุ้นเคยกับการทบทวนวรรณกรรม | ใช้ทำ preliminary literature review ก่อนเขียน proposal |
+| **เจ้าหน้าที่สาธารณสุข** | ต้องการข้อมูลวิจัยสนับสนุนนโยบาย | ใช้ค้นหาหลักฐานเชิงวิชาการประกอบรายงาน |
+| **นักศึกษา** | กำลังเรียนรู้การทำวิจัย | ใช้เป็นจุดเริ่มต้นค้นคว้า, ดูตัวอย่างการอ้างอิง APA |
+| **ผู้บริหาร สสส.** | ต้องการ evidence-based decision making | ใช้ดูภาพรวมงานวิจัยในประเด็นที่สนใจ |
+
+### 2.4 ข้อจำกัด
+
+1. **ขึ้นกับ ThaiJO Microservice** — ต้องมี ThaiJO microservice (:8505) ทำงานอยู่
+2. **คุณภาพสรุป** — AI summary มาจาก ThaiJO microservice (OpenAI GPT-4.1) ไม่ใช่ Gemini
+3. **ขอบเขตภาษา** — รองรับเฉพาะภาษาไทยและภาษาอังกฤษ
+4. **จำนวนบทความ** — ThaiJO API คืนสูงสุด 10 บทความต่อ query, ใช้ multi-query ได้สูงสุด 4 queries = 40 บทความ
+5. **เวลาประมวลผล** — ThaiJO microservice ใช้เวลา ~10-60s ต่อ query (AI summarization เป็น bottleneck)
+6. **APA Citation** — reference field จาก ThaiJO อาจเป็น null สำหรับบางบทความ
+7. **ไม่มี Full-text** — ได้เฉพาะ AI summary ไม่ใช่ full-text ของบทความ
+
+### 2.5 สมมติฐานและข้อพึ่งพิง
+
+| สมมติฐาน | เหตุผล |
+|---------|-------|
+| ThaiJO Microservice (:8505) พร้อมใช้งาน | เป็น external dependency ที่ต้อง deploy ก่อน |
+| TCI-THAIJO.org ออนไลน์ | Upstream data source |
+| Gemini API พร้อมใช้งาน | ใช้สำหรับ agents (topic parsing, synthesis, report) |
+| Evidence registry table พร้อม (migration 010+015) | สำหรับเก็บ ThaiJO citations |
+| ผู้ใช้ระบุหัวข้อเป็นภาษาไทย | TCI-THAIJO ค้นหาได้ดีกว่าด้วยภาษาไทย |
+
+---
+
+## 3. ความต้องการเชิงหน้าที่ (Functional Requirements)
+
+### 3.1 FR-TJR: ThaiJO Research Report Pipeline
+
+#### FR-TJR-001: Research Topic Parsing
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-001 |
+| **ชื่อ** | วิเคราะห์หัวข้อวิจัยและสร้าง search queries |
+| **คำอธิบาย** | รับหัวข้อวิจัยจากผู้ใช้ แยกเป็น main topic, sub-topics, และ search queries 3-5 ข้อ |
+| **Agent** | Research Topic Parser (Fast LLM) |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**Input:**
+```json
+{
+  "message": "ทบทวนงานวิจัยเกี่ยวกับปัจจัยเสี่ยงอุบัติเหตุทางถนนในประเทศไทย",
+  "max_articles": 15,
+  "year_range": "2020-2026"
+}
+```
+
+**Output:**
+```json
+{
+  "main_topic": "ปัจจัยเสี่ยงอุบัติเหตุทางถนนในประเทศไทย",
+  "domain": "road_traffic_injury",
+  "search_queries": [
+    {"term": "ปัจจัยเสี่ยง อุบัติเหตุ ถนน ประเทศไทย", "size": 5, "priority": 1},
+    {"term": "พฤติกรรมเสี่ยง ขับขี่ รถจักรยานยนต์", "size": 5, "priority": 2},
+    {"term": "แอลกอฮอล์ ดื่มแล้วขับ อุบัติเหตุ", "size": 3, "priority": 3},
+    {"term": "หมวกนิรภัย เข็มขัดนิรภัย ความปลอดภัย", "size": 3, "priority": 4}
+  ],
+  "inclusion_criteria": "งานวิจัยในประเทศไทย ปี 2020-2026 ที่เกี่ยวกับอุบัติเหตุทางถนน",
+  "exclusion_criteria": "บทความที่ไม่เกี่ยวกับประเทศไทย หรือไม่ใช่อุบัติเหตุทางถนน"
+}
+```
+
+**Acceptance Criteria:**
+- [ ] สร้าง search queries 3-5 ข้อจากหัวข้อเดียว
+- [ ] แต่ละ query มีคำค้น 2-5 คำ (ตามคำแนะนำของ search_thaijo tool)
+- [ ] กำหนด size ให้เหมาะสม (รวมทุก query ≤ max_articles)
+- [ ] ระบุ domain ได้ถูกต้อง
+- [ ] สร้าง inclusion/exclusion criteria อัตโนมัติ
+
+---
+
+#### FR-TJR-002: ThaiJO Multi-Query Search
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-002 |
+| **ชื่อ** | ค้นหาบทความจาก ThaiJO หลาย query พร้อมกัน |
+| **คำอธิบาย** | เรียก search_thaijo tool ตาม queries ที่ได้จาก FR-TJR-001 รวมผลลัพธ์ และ deduplicate |
+| **Agent** | ThaiJO Multi-Query Searcher (Fast LLM) |
+| **Tools** | `search_thaijo` (existing tool, src/tools/thaijo.py) |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**Process:**
+```
+For each query in search_queries:
+  1. Call search_thaijo(term=query.term, size=query.size, strict=True)
+  2. Collect results
+  3. If count == 0 and strict == True:
+     Retry with strict=False (broader search)
+
+Merge all results:
+  1. Deduplicate by pdf_url (same PDF = same article)
+  2. Tag each result with originating query
+  3. Return merged list
+```
+
+**Output:**
+```json
+{
+  "total_queries": 4,
+  "total_raw_results": 16,
+  "total_unique_articles": 12,
+  "articles": [
+    {
+      "pdf_url": "https://he01.tci-thaijo.org/...",
+      "summary": "สรุปบทความ...",
+      "reference": "APA citation text...",
+      "source_queries": ["ปัจจัยเสี่ยง อุบัติเหตุ ถนน"],
+      "source_type": "thaijo_article",
+      "trust_level": "medium"
+    }
+  ],
+  "query_results": [
+    {"query": "ปัจจัยเสี่ยง อุบัติเหตุ ถนน", "count": 5, "strict": true},
+    {"query": "พฤติกรรมเสี่ยง ขับขี่", "count": 4, "strict": true}
+  ]
+}
+```
+
+**Acceptance Criteria:**
+- [ ] เรียก search_thaijo ได้ตาม queries ทั้งหมด
+- [ ] Deduplicate ด้วย pdf_url (ไม่ซ้ำ)
+- [ ] Retry with strict=False ถ้าผลลัพธ์ว่าง
+- [ ] เก็บข้อมูลว่าบทความมาจาก query ไหน
+- [ ] ทนต่อ timeout/error ของ ThaiJO (skip failed query, ดำเนินต่อ)
+- [ ] รวมเวลาทุก query ไม่เกิน THAIJO_TIMEOUT * query_count (worst case)
+
+---
+
+#### FR-TJR-003: Article Relevance Screening
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-003 |
+| **ชื่อ** | คัดกรองความเกี่ยวข้องของบทความ |
+| **คำอธิบาย** | วิเคราะห์ summary ของแต่ละบทความ ให้คะแนนความเกี่ยวข้อง คัดเลือกบทความที่เหมาะสม |
+| **Agent** | Article Relevance Screener (Fast LLM) |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**Scoring Criteria (0-10):**
+
+| เกณฑ์ | คะแนน | น้ำหนัก |
+|-------|-------|---------|
+| ตรงตาม main_topic | 0-10 | 40% |
+| เกี่ยวข้องกับ domain | 0-10 | 20% |
+| มีข้อมูลเชิงปริมาณ (ตัวเลข, สถิติ) | 0-10 | 15% |
+| เป็นงานวิจัยในประเทศไทย | 0-10 | 15% |
+| มี reference field (APA citation) | 0/10 | 10% |
+
+**Thresholds:**
+- `relevance_score ≥ 7`: Include (high relevance)
+- `relevance_score 5-6`: Include if needed (medium relevance)
+- `relevance_score < 5`: Exclude (low relevance)
+
+**Output:**
+```json
+{
+  "screened_articles": [
+    {
+      "pdf_url": "...",
+      "summary": "...",
+      "reference": "...",
+      "relevance_score": 8.5,
+      "relevance_reason": "ตรงประเด็นปัจจัยเสี่ยง มีสถิติชัดเจน",
+      "themes": ["พฤติกรรมเสี่ยง", "มอเตอร์ไซค์"],
+      "included": true
+    }
+  ],
+  "total_screened": 12,
+  "total_included": 10,
+  "total_excluded": 2,
+  "exclusion_reasons": ["ไม่เกี่ยวกับอุบัติเหตุทางถนน", "เป็นงานวิจัยในต่างประเทศ"]
+}
+```
+
+**Acceptance Criteria:**
+- [ ] ให้คะแนนทุกบทความตามเกณฑ์ 5 ข้อ
+- [ ] Include อย่างน้อย 5 บทความ (ถ้ามี)
+- [ ] ระบุ themes ของแต่ละบทความ (ใช้สำหรับ thematic analysis)
+- [ ] ระบุเหตุผลการ include/exclude
+- [ ] ไม่ include บทความที่ relevance < 5
+
+---
+
+#### FR-TJR-004: Citation & Evidence Generation
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-004 |
+| **ชื่อ** | สร้าง APA citations และลงทะเบียน evidence |
+| **คำอธิบาย** | สร้าง citation codes C-200~C-299 สำหรับแต่ละบทความ ลงทะเบียนใน evidence_registry |
+| **Agent** | Citation & Evidence Generator (Fast LLM) |
+| **Tools** | `register_evidence`, `register_claim_links` (existing) |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**Citation Generation Rules:**
+1. ใช้ citation range C-200 to C-299
+2. ถ้ามี `reference` field → ใช้เป็น `bibliography_text` ตรงๆ
+3. ถ้า `reference` เป็น null → สร้าง fallback: `[ไม่ระบุผู้แต่ง]. (ไม่ระบุปี). *[ชื่อจาก summary]*. ThaiJO. {pdf_url}`
+4. `open_url` = pdf_url (link ไปยัง TCI-THAIJO ตรง)
+5. Deduplicate: pdf_url เดียวกัน = citation code เดียวกัน
+6. **ห้ามสร้าง author/year/page ที่ไม่มีในข้อมูล**
+
+**Evidence Registration:**
+```json
+{
+  "evidence_id": "EV-T001",
+  "evidence_type": "thaijo_article",
+  "source_ref": "https://he01.tci-thaijo.org/...",
+  "title": "ชื่อจาก summary 50 อักษรแรก",
+  "text_snippet": "summary 500 อักษรแรก",
+  "trust_level": "medium",
+  "open_url": "https://he01.tci-thaijo.org/...",
+  "thaijo_pdf_url": "https://he01.tci-thaijo.org/...",
+  "thaijo_reference": "APA citation text...",
+  "thaijo_summary": "AI summary text..."
+}
+```
+
+**Acceptance Criteria:**
+- [ ] สร้าง citation code C-200+ ให้ทุกบทความที่ included
+- [ ] ใช้ reference field เป็น APA ถ้ามี ไม่แต่งเอง
+- [ ] ลงทะเบียนใน evidence_registry สำเร็จ
+- [ ] ไม่มี duplicate citation codes
+- [ ] open_url ชี้ไปยัง TCI-THAIJO ถูกต้อง
+
+---
+
+#### FR-TJR-005: Research Synthesis
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-005 |
+| **ชื่อ** | สังเคราะห์งานวิจัยเป็น thematic analysis |
+| **คำอธิบาย** | วิเคราะห์ summary ของบทความทั้งหมด จัดกลุ่มตาม theme สังเคราะห์ข้อค้นพบร่วม หาช่องว่างวิจัย |
+| **Agent** | Research Synthesizer (Pro LLM) |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**Output Structure (3-4 themes, 300-500 words/theme):**
+```json
+{
+  "themes": [
+    {
+      "theme_name": "ปัจจัยด้านพฤติกรรมผู้ขับขี่",
+      "article_count": 4,
+      "article_citations": ["C-200", "C-203", "C-205", "C-208"],
+      "synthesis": "จากการทบทวนงานวิจัย 4 ชิ้น พบว่าปัจจัยด้านพฤติกรรม... [C-200] ... [C-203] ...",
+      "key_findings": [
+        "การดื่มแอลกอฮอล์เป็นปัจจัยเสี่ยงอันดับ 1 [C-200]",
+        "การไม่สวมหมวกนิรภัยเพิ่มโอกาสเสียชีวิต 3.2 เท่า [C-205]"
+      ],
+      "contradictions": "งานวิจัยของ [C-203] ระบุว่า... ขณะที่ [C-208] พบว่า..."
+    }
+  ],
+  "overall_findings": "ภาพรวมจากงานวิจัย N ชิ้น พบว่า...",
+  "research_gaps": [
+    "ขาดงานวิจัยเชิงคุณภาพเกี่ยวกับปัจจัยทางสังคมวัฒนธรรม",
+    "ยังไม่มีการศึกษาผลกระทบของเทคโนโลยีช่วยขับขี่ (ADAS)"
+  ],
+  "methodology_note": "ส่วนใหญ่เป็นงานวิจัยเชิงปริมาณ (cross-sectional design)"
+}
+```
+
+**Acceptance Criteria:**
+- [ ] จัดกลุ่มบทความเป็น 2-5 themes
+- [ ] แต่ละ theme อ้างอิง citation code ถูกต้อง
+- [ ] ระบุ contradictions ระหว่างบทความ (ถ้ามี)
+- [ ] ระบุ research gaps อย่างน้อย 2 ข้อ
+- [ ] ระบุ methodology note (ประเภทงานวิจัยส่วนใหญ่)
+- [ ] ใช้ภาษาไทยระดับวิชาการ
+
+---
+
+#### FR-TJR-006: Research Report Composition
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-006 |
+| **ชื่อ** | เรียบเรียงรายงานทบทวนวรรณกรรมภาษาไทย |
+| **คำอธิบาย** | รวม synthesis, citations, charts เป็นรายงาน Markdown ภาษาไทย 1,500-3,000 คำ |
+| **Agent** | Research Report Composer (Pro LLM) |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**Report Structure:**
+
+```markdown
+## บทคัดย่อ (Abstract)
+สรุปผลการทบทวนวรรณกรรม 200-300 คำ
+- จำนวนบทความที่ทบทวน
+- ข้อค้นพบหลัก 3-5 ข้อ
+- ข้อเสนอแนะ
+
+## 1. บทนำ (Introduction)
+- ความเป็นมาและความสำคัญของหัวข้อ (200-300 คำ)
+- วัตถุประสงค์ของการทบทวนวรรณกรรม
+- ขอบเขตการค้นหา (TCI-THAIJO, ปีที่ค้นหา, คำค้น)
+
+## 2. วิธีการสืบค้น (Search Methodology)
+- แหล่งข้อมูล: TCI-THAIJO
+- คำค้น: [list queries]
+- เกณฑ์การคัดเข้า/คัดออก
+- จำนวนบทความที่พบ/คัดเลือก (PRISMA-style flow)
+
+## 3. ผลการทบทวนวรรณกรรม (Results)
+### 3.1 ภาพรวมบทความที่ทบทวน
+- ตารางสรุป (ผู้แต่ง, ปี, วัตถุประสงค์, วิธีการ, ผลลัพธ์หลัก)
+### 3.2 การวิเคราะห์เชิงเนื้อหา (Thematic Analysis)
+- Theme 1: ... [C-200] [C-203]
+- Theme 2: ... [C-201] [C-204]
+- Theme 3: ...
+### 3.3 ข้อค้นพบที่สอดคล้องกัน
+### 3.4 ข้อค้นพบที่ขัดแย้งกัน
+
+## 4. อภิปราย (Discussion)
+- สรุปข้อค้นพบหลัก (300-400 คำ)
+- ข้อจำกัดของงานวิจัยที่ทบทวน
+- ช่องว่างการวิจัย (Research Gaps)
+
+## 5. สรุปและข้อเสนอแนะ (Conclusion & Recommendations)
+- สรุป 3-5 ข้อ
+- ข้อเสนอแนะเชิงนโยบาย
+- ข้อเสนอแนะสำหรับงานวิจัยในอนาคต
+
+## เอกสารอ้างอิง (References)
+[C-200] Author, A. (Year). *Title*. Journal, Vol(Issue), Pages.
+[C-201] ...
+
+## คำถามวิจัยเพิ่มเติม (Follow-up Research Questions)
+1. ...
+2. ...
+3. ...
+```
+
+**Writing Rules:**
+- ภาษาไทยระดับวิชาการ (academic Thai)
+- ทุกตัวเลข/ข้อสรุปต้องมี [C-xxx] citation
+- ตาราง/กราฟต้องมี source_note
+- ห้ามสร้างข้อมูลที่ไม่อยู่ใน summary ของบทความ
+- ระบุข้อจำกัดของการทบทวน (เช่น ใช้ AI summary ไม่ใช่ full-text)
+
+**Acceptance Criteria:**
+- [ ] รายงาน 1,500-3,000 คำ
+- [ ] มีครบ 5 sections + references + follow-ups
+- [ ] ทุก claim มี citation [C-xxx]
+- [ ] ตารางสรุปบทความ (≥1 table)
+- [ ] กราฟสรุป theme distribution (≥1 chart)
+- [ ] APA 7th bibliography
+- [ ] Follow-up questions 3 ข้อ
+
+---
+
+### 3.2 FR-TJR-API: API Endpoints
+
+#### FR-TJR-API-001: ThaiJO Research Report Endpoint
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-API-001 |
+| **Method** | `POST` |
+| **Path** | `/api/thaijo/research` |
+| **คำอธิบาย** | สร้างรายงานทบทวนวรรณกรรมจาก ThaiJO |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**Request Schema:**
+```json
+{
+  "topic": "ปัจจัยเสี่ยงอุบัติเหตุทางถนนในประเทศไทย",
+  "max_articles": 15,
+  "session_id": "optional-session-id",
+  "user_id": "optional-user-id"
+}
+```
+
+**Response Schema** (`ThaiJOResearchResponse`):
+```json
+{
+  "content": "## บทคัดย่อ\n...(Markdown)",
+  "topic": "road_traffic_injury",
+  "articles_found": 16,
+  "articles_selected": 10,
+  "charts": [
+    {
+      "type": "pie",
+      "title": "การกระจายตาม Theme ของบทความ",
+      "data": {"labels": ["พฤติกรรม","สิ่งแวดล้อม","นโยบาย"], "datasets": [...]},
+      "source_note": "จากการวิเคราะห์บทความ TCI-THAIJO 10 ชิ้น"
+    }
+  ],
+  "tables": [
+    {
+      "title": "สรุปบทความที่ทบทวน",
+      "headers": ["#", "ผู้แต่ง/ปี", "วัตถุประสงค์", "วิธีการ", "ผลลัพธ์หลัก", "Citation"],
+      "rows": [["1", "...", "...", "...", "...", "[C-200]"]]
+    }
+  ],
+  "citations": [
+    {
+      "citation_code": "C-200",
+      "source_type": "thaijo_article",
+      "source_ref": "https://he01.tci-thaijo.org/...",
+      "citation_text": "(Author, Year)",
+      "open_url": "https://he01.tci-thaijo.org/...",
+      "bibliography_text": "Author, A. (Year). *Title*. Journal."
+    }
+  ],
+  "follow_ups": [
+    "ปัจจัยทางเศรษฐกิจสังคมมีผลต่ออุบัติเหตุอย่างไร?",
+    "มาตรการบังคับใช้กฎหมายมีประสิทธิผลแค่ไหน?",
+    "เทคโนโลยีช่วยขับขี่ลดอุบัติเหตุได้จริงหรือไม่?"
+  ],
+  "metadata": {
+    "elapsed_seconds": 120.5,
+    "agent_count": 6,
+    "pipeline": "thaijo_research",
+    "search_queries": 4,
+    "articles_found": 16,
+    "articles_selected": 10,
+    "coverage_score": 0.85
+  }
+}
+```
+
+---
+
+#### FR-TJR-API-002: ThaiJO Research Report Streaming
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-API-002 |
+| **Method** | `POST` |
+| **Path** | `/api/thaijo/research/stream` |
+| **คำอธิบาย** | SSE streaming version ของ research report |
+| **Priority** | Should Have |
+| **Status** | 📋 Planned |
+
+**SSE Event Types:**
+```
+event: start
+data: {"type": "start", "message": "เริ่มค้นหาบทความวิชาการ..."}
+
+event: search_progress
+data: {"type": "search_progress", "query": "ปัจจัยเสี่ยง อุบัติเหตุ", "count": 5, "elapsed": 15.2}
+
+event: screening
+data: {"type": "screening", "total": 12, "included": 10, "excluded": 2}
+
+event: agent_progress
+data: {"type": "agent_progress", "agent_name": "Research Synthesizer", "status": "running"}
+
+event: content
+data: {"type": "content", "data": <ThaiJOResearchResponse>}
+
+event: done
+data: {"type": "done", "pipeline": "thaijo_research"}
+```
+
+---
+
+#### FR-TJR-API-003: Unified Router Integration
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-API-003 |
+| **Method** | `POST` |
+| **Path** | `/api/chat/unified` (existing) |
+| **คำอธิบาย** | Request Router ต้องตรวจจับว่าเป็นคำขอ research report และ route ไปยัง thaijo_research pipeline |
+| **Priority** | Should Have |
+| **Status** | 📋 Planned |
+
+**Detection Keywords:**
+- "ทบทวนวรรณกรรม", "review งานวิจัย", "สืบค้นบทความ"
+- "ค้นหางานวิจัย", "literature review", "research synthesis"
+- "หาบทความวิชาการ", "สรุปงานวิจัย", "ThaiJO"
+
+---
+
+### 3.3 FR-TJR-UI: Test UI Requirements
+
+#### FR-TJR-UI-001: ThaiJO Search Test
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-UI-001 |
+| **ชื่อ** | ทดสอบการค้นหา ThaiJO โดยตรง |
+| **คำอธิบาย** | UI สำหรับค้นหาบทความ ThaiJO, ดูผลลัพธ์, ดูสถานะ service |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**UI Components:**
+- Search input (term, size, strict toggle)
+- Search button → POST /api/thaijo/search
+- Results display (article cards with summary, reference, pdf_url link)
+- Service status indicator → GET /api/thaijo/status
+
+#### FR-TJR-UI-002: Research Report Generation Test
+| รายการ | รายละเอียด |
+|-------|-----------|
+| **ID** | FR-TJR-UI-002 |
+| **ชื่อ** | ทดสอบการสร้างรายงานวิจัยจาก ThaiJO |
+| **คำอธิบาย** | UI สำหรับระบุหัวข้อวิจัย, ดู progress, ดูรายงาน/charts/citations |
+| **Priority** | Must Have |
+| **Status** | 📋 Planned |
+
+**UI Components:**
+- Topic input + max_articles slider
+- Generate button → POST /api/thaijo/research/stream (SSE)
+- Progress timeline (agent progress cards)
+- Report content (Markdown rendered)
+- Charts (Chart.js rendered)
+- Article summary table
+- Citations panel (with clickable open_url to TCI-THAIJO)
+- Bibliography section (APA 7th formatted)
+
+---
+
+## 4. ความต้องการเชิงไม่ใช่หน้าที่ (Non-Functional Requirements)
+
+### 4.1 NFR-TJR-PERF: Performance
+
+| ID | ข้อกำหนด | Target |
+|----|---------|--------|
+| NFR-TJR-PERF-001 | เวลาค้นหา ThaiJO (single query) | ≤ 60s (P95) |
+| NFR-TJR-PERF-002 | เวลาค้นหา ThaiJO (multi-query 4 queries) | ≤ 180s (P95) |
+| NFR-TJR-PERF-003 | เวลาสร้าง research report ทั้ง pipeline | ≤ 300s (5 min) |
+| NFR-TJR-PERF-004 | ขนาดรายงาน (content length) | 1,500-3,000 คำ |
+| NFR-TJR-PERF-005 | จำนวนบทความที่ include | 5-15 บทความ |
+
+### 4.2 NFR-TJR-REL: Reliability
+
+| ID | ข้อกำหนด | Target |
+|----|---------|--------|
+| NFR-TJR-REL-001 | ThaiJO service unavailable → graceful degradation | ส่ง error response พร้อมเหตุผล |
+| NFR-TJR-REL-002 | บาง query timeout → ดำเนินต่อด้วย query อื่น | Skip failed query |
+| NFR-TJR-REL-003 | ไม่พบบทความ → แจ้งผู้ใช้ | Response with 0 articles + suggestions |
+| NFR-TJR-REL-004 | reference field เป็น null → ใช้ fallback APA | ไม่ crash |
+
+### 4.3 NFR-TJR-SEC: Security
+
+| ID | ข้อกำหนด |
+|----|---------|
+| NFR-TJR-SEC-001 | ไม่ส่ง user input ไปยัง ThaiJO โดยไม่ sanitize |
+| NFR-TJR-SEC-002 | ไม่เก็บ API keys ใน response |
+| NFR-TJR-SEC-003 | ไม่ redirect ไปยัง URL ที่ไม่ใช่ tci-thaijo.org |
+
+---
+
+## 5. Pipeline Architecture
+
+### 5.1 Agent Pipeline Design
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│            ThaiJO Research Report Pipeline                     │
+│            6 agents — Process.sequential                      │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌────────────────────────────────────────┐                  │
+│  │ Agent 1: Research Topic Parser [Fast]  │                  │
+│  │ • Parse topic → sub-queries            │                  │
+│  │ • Output: 3-5 search queries           │                  │
+│  │ • Tools: ไม่มี                         │                  │
+│  └─────────────┬──────────────────────────┘                  │
+│                ▼                                              │
+│  ┌────────────────────────────────────────┐                  │
+│  │ Agent 2: ThaiJO Searcher [Fast]        │                  │
+│  │ • Execute multi-query search           │                  │
+│  │ • Deduplicate results                  │                  │
+│  │ • Tools: search_thaijo                 │                  │
+│  └─────────────┬──────────────────────────┘                  │
+│                ▼                                              │
+│  ┌────────────────────────────────────────┐                  │
+│  │ Agent 3: Article Screener [Fast]       │                  │
+│  │ • Score relevance (0-10)               │                  │
+│  │ • Filter threshold ≥ 5                 │                  │
+│  │ • Identify themes                      │                  │
+│  │ • Tools: ไม่มี                         │                  │
+│  └─────────────┬──────────────────────────┘                  │
+│                ▼                                              │
+│  ┌────────────────────────────────────────┐                  │
+│  │ Agent 4: Citation Generator [Fast]     │                  │
+│  │ • Generate C-200+ citation codes       │                  │
+│  │ • Register in evidence_registry        │                  │
+│  │ • APA bibliography from reference      │                  │
+│  │ • Tools: register_evidence,            │                  │
+│  │          register_claim_links          │                  │
+│  └─────────────┬──────────────────────────┘                  │
+│                ▼                                              │
+│  ┌────────────────────────────────────────┐                  │
+│  │ Agent 5: Research Synthesizer [Pro]    │                  │
+│  │ • Thematic analysis (2-5 themes)       │                  │
+│  │ • Cross-article findings               │                  │
+│  │ • Research gaps                        │                  │
+│  │ • Contradictions                       │                  │
+│  │ • Tools: ไม่มี                         │                  │
+│  └─────────────┬──────────────────────────┘                  │
+│                ▼                                              │
+│  ┌────────────────────────────────────────┐                  │
+│  │ Agent 6: Report Composer [Pro]         │                  │
+│  │ • Literature review 1,500-3,000 words  │                  │
+│  │ • 5 sections + references              │                  │
+│  │ • Article summary table                │                  │
+│  │ • Theme distribution chart             │                  │
+│  │ • 3 follow-up questions                │                  │
+│  │ • Tools: chart builder tools (7)       │                  │
+│  └─────────────┬──────────────────────────┘                  │
+│                ▼                                              │
+│  ThaiJOResearchResponse                                      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 LLM Tier Assignment
+
+| Agent | LLM Tier | Model | Temperature | Max Tokens | เหตุผล |
+|-------|----------|-------|-------------|-----------|--------|
+| Research Topic Parser | Fast | gemini-2.0-flash | 0.2 | 4096 | Parsing task, ไม่ต้องการ creativity |
+| ThaiJO Searcher | Fast | gemini-2.0-flash | 0.2 | 4096 | Tool execution, deterministic |
+| Article Screener | Fast | gemini-2.0-flash | 0.2 | 4096 | Scoring task, structured output |
+| Citation Generator | Fast | gemini-2.0-flash | 0.2 | 4096 | Structured data generation |
+| Research Synthesizer | Pro | gemini-2.5-pro | 0.3 | 8192 | Complex analysis, creativity needed |
+| Report Composer | Pro | gemini-2.5-pro | 0.3 | 8192 | Long-form writing, integration |
+
+### 5.3 Task Dependencies
+
+```
+parse_topic_task (standalone)
+  ↓
+search_thaijo_task (depends: parse_topic)
+  ↓
+screen_articles_task (depends: search_thaijo)
+  ↓
+generate_citations_task (depends: screen_articles)
+  ↓
+synthesize_research_task (depends: screen_articles + generate_citations)
+  ↓
+compose_report_task (depends: synthesize_research + generate_citations)
+```
+
+---
+
+## 6. Data Models
+
+### 6.1 ThaiJOResearchRequest
+```python
+class ThaiJOResearchRequest(BaseModel):
+    topic: str                          # หัวข้อวิจัย (required)
+    max_articles: int = 15              # จำนวนบทความสูงสุด
+    max_queries: int = 4                # จำนวน search queries สูงสุด
+    min_relevance: float = 5.0          # คะแนนความเกี่ยวข้องขั้นต่ำ (0-10)
+    session_id: str | None = None       # Optional session ID
+    user_id: str | None = None          # Optional user ID
+```
+
+### 6.2 ThaiJOResearchResponse
+```python
+class ThaiJOResearchResponse(BaseModel):
+    content: str                        # Markdown report (Thai)
+    topic: str                          # Detected domain
+    articles_found: int                 # Total articles from ThaiJO
+    articles_selected: int              # Articles after screening
+    charts: list[ChartSpec] = []        # Theme distribution, year trend
+    tables: list[TableSpec] = []        # Article summary table
+    citations: list[Citation] = []      # C-200+ citations
+    follow_ups: list[str] = []          # 3 follow-up research questions
+    metadata: dict = {}                 # elapsed_seconds, pipeline, queries, coverage
+```
+
+### 6.3 ScreenedArticle (internal)
+```python
+class ScreenedArticle(BaseModel):
+    pdf_url: str
+    summary: str
+    reference: str | None
+    relevance_score: float              # 0-10
+    relevance_reason: str
+    themes: list[str]                   # e.g. ["พฤติกรรมเสี่ยง", "มอเตอร์ไซค์"]
+    included: bool
+    source_queries: list[str]           # Which queries found this article
+```
+
+---
+
+## 7. Implementation Files
+
+### 7.1 New Files Required
+
+| ไฟล์ | บทบาท | Priority |
+|------|-------|---------|
+| `src/agents/thaijo_research_orchestrator.py` | Crew builder สำหรับ ThaiJO Research pipeline | Must Have |
+| `src/agents/thaijo_topic_parser.py` | Agent 1: Parse topic → search queries | Must Have |
+| `src/agents/thaijo_searcher.py` | Agent 2: Multi-query ThaiJO search | Must Have |
+| `src/agents/thaijo_screener.py` | Agent 3: Article relevance screening | Must Have |
+| `src/agents/thaijo_research_synthesizer.py` | Agent 5: Thematic analysis & synthesis | Must Have |
+| `src/agents/thaijo_report_composer.py` | Agent 6: Literature review report | Must Have |
+| `src/routers/thaijo.py` | เพิ่ม endpoint `/api/thaijo/research` | Must Have |
+| `src/schemas/thaijo_research.py` | Request/Response schemas | Must Have |
+| `static/thaijo_research_ui.html` | Test UI | Must Have |
+
+### 7.2 Modified Files
+
+| ไฟล์ | การเปลี่ยนแปลง |
+|------|---------------|
+| `src/agents/citation_evidence.py` | ใช้ซ้ำ Agent 4 (ไม่ต้องสร้างใหม่) |
+| `src/routers/thaijo.py` | เพิ่ม 2 endpoints (research, research/stream) |
+| `src/main.py` | ไม่ต้องแก้ (thaijo router ลงทะเบียนแล้ว) |
+| `src/agents/request_router.py` | เพิ่ม detection สำหรับ "thaijo_research" pipeline |
+
+---
+
+## 8. Traceability Matrix
+
+| Requirement | API Endpoint | Source File | Agent |
+|------------|-------------|-------------|-------|
+| FR-TJR-001 | `/api/thaijo/research` | `thaijo_topic_parser.py` | Research Topic Parser |
+| FR-TJR-002 | `/api/thaijo/research` | `thaijo_searcher.py` | ThaiJO Searcher |
+| FR-TJR-003 | `/api/thaijo/research` | `thaijo_screener.py` | Article Screener |
+| FR-TJR-004 | `/api/thaijo/research` | `citation_evidence.py` | Citation Generator |
+| FR-TJR-005 | `/api/thaijo/research` | `thaijo_research_synthesizer.py` | Research Synthesizer |
+| FR-TJR-006 | `/api/thaijo/research` | `thaijo_report_composer.py` | Report Composer |
+| FR-TJR-API-001 | `POST /api/thaijo/research` | `routers/thaijo.py` | — |
+| FR-TJR-API-002 | `POST /api/thaijo/research/stream` | `routers/thaijo.py` | — |
+| FR-TJR-API-003 | `POST /api/chat/unified` | `request_router.py` | Request Router |
+| FR-TJR-UI-001 | — | `static/thaijo_research_ui.html` | — |
+| FR-TJR-UI-002 | — | `static/thaijo_research_ui.html` | — |
+
+---
+
+## 9. Sprint Plan
+
+### Sprint 1: Foundation (2-3 days)
+
+| Task | File | Status |
+|------|------|--------|
+| สร้าง ThaiJOResearchRequest/Response schemas | `src/schemas/thaijo_research.py` | 📋 |
+| สร้าง Research Topic Parser agent | `src/agents/thaijo_topic_parser.py` | 📋 |
+| สร้าง ThaiJO Multi-Query Searcher agent | `src/agents/thaijo_searcher.py` | 📋 |
+| สร้าง Article Screener agent | `src/agents/thaijo_screener.py` | 📋 |
+| Unit tests | `tests/test_thaijo_research.py` | 📋 |
+
+### Sprint 2: Analysis & Report (2-3 days)
+
+| Task | File | Status |
+|------|------|--------|
+| สร้าง Research Synthesizer agent | `src/agents/thaijo_research_synthesizer.py` | 📋 |
+| สร้าง Report Composer agent | `src/agents/thaijo_report_composer.py` | 📋 |
+| สร้าง Crew orchestrator | `src/agents/thaijo_research_orchestrator.py` | 📋 |
+| Integration test (full pipeline) | `tests/test_thaijo_research_e2e.py` | 📋 |
+
+### Sprint 3: API & UI (2-3 days)
+
+| Task | File | Status |
+|------|------|--------|
+| เพิ่ม `/api/thaijo/research` endpoint | `src/routers/thaijo.py` | 📋 |
+| เพิ่ม `/api/thaijo/research/stream` SSE | `src/routers/thaijo.py` | 📋 |
+| สร้าง Test UI | `static/thaijo_research_ui.html` | 📋 |
+| อัปเดต Request Router | `src/agents/request_router.py` | 📋 |
+| End-to-end testing | Manual | 📋 |
+
+### Sprint 4: Polish (1-2 days)
+
+| Task | File | Status |
+|------|------|--------|
+| อัปเดต AGENT_WORKFLOW_UNIFIED.md | `doc/AGENT_WORKFLOW_UNIFIED.md` | 📋 |
+| อัปเดต ARCHITECTURE.md | `doc/ARCHITECTURE.md` | 📋 |
+| Error handling review | All files | 📋 |
+| Performance testing (5-minute budget) | Manual | 📋 |
+
+**Total estimated: 7-11 days**
+
+---
+
+## 10. ภาคผนวก
+
+### A. Example Research Topics
+
+| หัวข้อ (Thai) | Domain | Expected Queries |
+|-------------|--------|-----------------|
+| ปัจจัยเสี่ยงอุบัติเหตุทางถนน | road_traffic_injury | ปัจจัยเสี่ยง+อุบัติเหตุ, พฤติกรรมขับขี่, ดื่มแล้วขับ, หมวกนิรภัย |
+| โรคซึมเศร้าในผู้สูงอายุไทย | mental_health | ซึมเศร้า+ผู้สูงอายุ, สุขภาพจิต+ผู้สูงอายุ, ดูแลผู้สูงอายุ |
+| ผลกระทบมลพิษทางอากาศ PM2.5 | environmental_health | PM2.5+สุขภาพ, มลพิษอากาศ+ระบบหายใจ, ฝุ่นพิษ+เด็ก |
+| เบาหวานชนิดที่ 2 การป้องกัน | ncd | เบาหวาน+ป้องกัน, โรคเรื้อรัง+พฤติกรรม, เบาหวาน+ออกกำลังกาย |
+| อาหารปลอดภัย สารเคมีปนเปื้อน | food_safety | อาหารปลอดภัย+สารเคมี, ยาฆ่าแมลง+อาหาร, สารปนเปื้อน+ผัก |
+
+### B. PRISMA-style Article Selection Flow
+
+```
+Records identified through ThaiJO search (n = XX)
+    │
+    ▼
+Records after duplicates removed (n = XX)
+    │
+    ▼
+Records screened by AI (n = XX)
+    │         │
+    │         └─ Records excluded (n = XX)
+    │            - ไม่เกี่ยวกับหัวข้อ
+    │            - ไม่ใช่บริบทประเทศไทย
+    │            - relevance score < 5
+    ▼
+Articles included in synthesis (n = XX)
+```
+
+### C. Chart Types for Research Report
+
+| Chart | ใช้สำหรับ | ChartSpec type |
+|-------|---------|---------------|
+| Theme Distribution Pie | แสดงสัดส่วนบทความแต่ละ theme | `pie` |
+| Publication Year Bar | แสดงจำนวนบทความตามปีที่ตีพิมพ์ | `bar` |
+| Methodology Doughnut | แสดงประเภท methodology ที่ใช้ | `doughnut` |
+| Relevance Score Bar | แสดงคะแนน relevance ของแต่ละบทความ | `bar` |
+
+---
+
+*Last updated: 2026-04-16 | เกี่ยวข้องกับ: [THAIJO_AGENT_IMPLEMENTATION.md](./THAIJO_AGENT_IMPLEMENTATION.md), [AGENT_WORKFLOW_UNIFIED.md](./AGENT_WORKFLOW_UNIFIED.md)*

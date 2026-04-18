@@ -45,6 +45,8 @@ class Citation(BaseModel):
     source_type: str = Field(..., description="document | database | api")
     source_ref: str = Field("", description="Document name or table name")
     citation_text: str = Field("", description="Human-readable citation text")
+    open_url: str = Field("", description="URL to open source document, e.g. /api/documents/open/123")
+    bibliography_text: str = Field("", description="Full APA 7th Edition reference text")
 
 
 class AgentResponse(BaseModel):

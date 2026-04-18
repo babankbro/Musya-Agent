@@ -45,7 +45,7 @@ POLICY_PIPELINE_AGENTS = [
     {"name": "Request Router", "icon": "🔀", "order": 0},
     # Foundation agents 1-4 (shared — same as chat pipeline)
     {"name": "Request Interpreter", "icon": "🎯", "order": 1},
-    {"name": "Retrieval Agent", "icon": "�", "order": 2},  # +NLM tools for policy
+    {"name": "Retrieval Agent", "icon": "🔍", "order": 2},  # +NLM tools for policy
     {"name": "SQL Specialist", "icon": "🗄️", "order": 3},
     {"name": "Citation & Evidence", "icon": "📚", "order": 4},
     # Policy-specific agents 5-8
@@ -53,6 +53,23 @@ POLICY_PIPELINE_AGENTS = [
     {"name": "Mental Health Analyst", "icon": "🧠", "order": 5},  # parallel
     {"name": "NCD Analyst", "icon": "🍎", "order": 5},            # parallel
     {"name": "Policy Report Writer", "icon": "📋", "order": 6},
+]
+
+THAIJO_RESEARCH_PIPELINE_AGENTS = [
+    {"name": "Request Router", "icon": "🔀", "order": 0},
+    {"name": "Research Topic Parser", "icon": "🎯", "order": 1},
+    {"name": "ThaiJO Searcher", "icon": "🔍", "order": 2},
+    {"name": "Article Screener", "icon": "🔎", "order": 3},
+    {"name": "Citation Generator", "icon": "📚", "order": 4},
+    {"name": "Research Synthesizer", "icon": "🔬", "order": 5},
+    {"name": "Report Composer", "icon": "✍️", "order": 6},
+]
+
+SHORT_CHAT_PIPELINE_AGENTS = [
+    {"name": "Request Router", "icon": "🔀", "order": 0},
+    {"name": "Request Interpreter", "icon": "🎯", "order": 1},
+    {"name": "Quick Retrieval", "icon": "🔍", "order": 2},
+    {"name": "Quick Answer Writer", "icon": "✍️", "order": 3},
 ]
 
 
@@ -89,7 +106,7 @@ def emit_progress(
         return
     
     # Find agent metadata
-    all_agents = CHAT_PIPELINE_AGENTS + POLICY_PIPELINE_AGENTS
+    all_agents = CHAT_PIPELINE_AGENTS + POLICY_PIPELINE_AGENTS + THAIJO_RESEARCH_PIPELINE_AGENTS
     agent_meta = next((a for a in all_agents if a["name"] == agent_name), None)
     icon = agent_meta["icon"] if agent_meta else "🤖"
     order = agent_meta["order"] if agent_meta else 0
@@ -125,4 +142,6 @@ def get_pipeline_agents(pipeline: str) -> list[dict]:
     """Get agent list for a pipeline."""
     if pipeline == "policy_brief_pipeline":
         return POLICY_PIPELINE_AGENTS
+    if pipeline == "thaijo_research_pipeline":
+        return THAIJO_RESEARCH_PIPELINE_AGENTS
     return CHAT_PIPELINE_AGENTS

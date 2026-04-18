@@ -23,6 +23,8 @@ from typing import Optional
 from src.agents.request_router import route_request
 from src.agents.orchestrator import run_chat, run_chat_with_progress
 from src.agents.policy_orchestrator import run_policy_brief, run_policy_brief_with_progress, validate_province
+from src.agents.thaijo_research_orchestrator import run_thaijo_research, run_thaijo_research_with_progress
+from src.agents.short_chat_orchestrator import run_short_chat, run_short_chat_with_progress
 from src.schemas.response import AgentResponse
 from src.tools.notebooklm import SUPPORTED_PROVINCES
 from src.agents.progress import emit_progress
@@ -30,7 +32,7 @@ from src.agents.progress import emit_progress
 logger = logging.getLogger(__name__)
 
 
-def run_unified(user_message: str, session_id: str | None = None) -> dict:
+def run_unified(user_message: str, session_id: str | None = None, mode: str | None = None) -> dict:
     """Unified entry point: route → run the correct pipeline → return result.
 
     Returns:
@@ -42,7 +44,7 @@ def run_unified(user_message: str, session_id: str | None = None) -> dict:
     start_time = time.time()
 
     # ── Step 1: Route the request ──
-    routing = route_request(user_message)
+    routing = route_request(user_message, mode=mode)
     pipeline = routing["pipeline"]
     params = routing.get("extracted_params", {})
 
@@ -56,6 +58,10 @@ def run_unified(user_message: str, session_id: str | None = None) -> dict:
     # ── Step 2: Execute the chosen pipeline ──
     if pipeline == "policy_brief_pipeline":
         result = _run_policy_brief_pipeline(user_message, params)
+    elif pipeline == "thaijo_research_pipeline":
+        result = _run_thaijo_research_pipeline(user_message, params)
+    elif pipeline == "short_chat":
+        result = _run_short_chat_pipeline(user_message, session_id)
     else:
         result = _run_chat_pipeline(user_message, session_id)
 
@@ -88,6 +94,13 @@ def _run_chat_pipeline(user_message: str, session_id: str | None) -> AgentRespon
     """Execute chat pipeline (4 shared foundation + 3 chat-specific agents)."""
     logger.info("📊 [UNIFIED] Running chat_pipeline")
     return run_chat(user_message=user_message, session_id=session_id)
+
+
+def _run_short_chat_pipeline(user_message: str, session_id: str | None) -> dict:
+    """Execute short chat pipeline (Interpreter + Quick Retrieval + Quick Answer Writer)."""
+    logger.info("💬 [UNIFIED] Running short_chat pipeline")
+    result = run_short_chat(user_message=user_message, session_id=session_id)
+    return result.model_dump()
 
 
 def _run_policy_brief_pipeline(user_message: str, params: dict) -> dict:
@@ -143,6 +156,7 @@ def run_unified_with_progress(
     user_message: str,
     session_id: Optional[str] = None,
     request_id: Optional[str] = None,
+    mode: Optional[str] = None,
 ) -> dict:
     """Unified entry point with progress tracking for streaming.
 
@@ -152,7 +166,7 @@ def run_unified_with_progress(
 
     # ── Step 1: Route the request ──
     emit_progress(request_id, "Request Router", "running", "กำลังวิเคราะห์คำขอ...")
-    routing = route_request(user_message)
+    routing = route_request(user_message, mode=mode)
     pipeline = routing["pipeline"]
     params = routing.get("extracted_params", {})
     emit_progress(request_id, "Request Router", "done", f"→ {pipeline}", time.time() - start_time)
@@ -166,6 +180,10 @@ def run_unified_with_progress(
     # ── Step 2: Execute the chosen pipeline with progress ──
     if pipeline == "policy_brief_pipeline":
         result = _run_policy_brief_pipeline_with_progress(user_message, params, request_id)
+    elif pipeline == "thaijo_research_pipeline":
+        result = _run_thaijo_research_pipeline_with_progress(user_message, params, request_id)
+    elif pipeline == "short_chat":
+        result = _run_short_chat_pipeline_with_progress(user_message, session_id, request_id)
     else:
         result = _run_chat_pipeline_with_progress(user_message, session_id, request_id)
 
@@ -204,6 +222,19 @@ def _run_chat_pipeline_with_progress(
         session_id=session_id,
         request_id=request_id,
     )
+
+
+def _run_short_chat_pipeline_with_progress(
+    user_message: str, session_id: Optional[str], request_id: str
+) -> dict:
+    """Execute short chat pipeline with progress tracking."""
+    logger.info("💬 [UNIFIED+PROGRESS] Running short_chat pipeline")
+    result = run_short_chat_with_progress(
+        user_message=user_message,
+        session_id=session_id,
+        request_id=request_id,
+    )
+    return result.model_dump()
 
 
 def _run_policy_brief_pipeline_with_progress(
@@ -250,3 +281,34 @@ def _run_policy_brief_pipeline_with_progress(
         year=year,
         request_id=request_id,
     )
+
+
+def _run_thaijo_research_pipeline(user_message: str, params: dict) -> dict:
+    """Execute ThaiJO research pipeline — uses user_message as research topic."""
+    topic = params.get("topic", user_message)
+    max_articles = params.get("max_articles", 15)
+    max_queries = params.get("max_queries", 4)
+    logger.info("🔬 [UNIFIED] Running thaijo_research_pipeline: topic=%s", topic[:80])
+    result = run_thaijo_research(
+        topic=topic,
+        max_articles=max_articles,
+        max_queries=max_queries,
+    )
+    return result.model_dump()
+
+
+def _run_thaijo_research_pipeline_with_progress(
+    user_message: str, params: dict, request_id: str
+) -> dict:
+    """Execute ThaiJO research pipeline with SSE progress tracking."""
+    topic = params.get("topic", user_message)
+    max_articles = params.get("max_articles", 15)
+    max_queries = params.get("max_queries", 4)
+    logger.info("🔬 [UNIFIED+PROGRESS] Running thaijo_research_pipeline: topic=%s", topic[:80])
+    result = run_thaijo_research_with_progress(
+        topic=topic,
+        max_articles=max_articles,
+        max_queries=max_queries,
+        request_id=request_id,
+    )
+    return result.model_dump()

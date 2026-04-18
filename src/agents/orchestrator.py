@@ -8,6 +8,8 @@ from crewai import Agent, Crew, Task, Process, LLM
 from crewai.agents.parser import AgentAction, AgentFinish
 
 from src.config import get_settings
+from src.db.pool import query_db
+from src.utils.apa_formatter import format_apa_reference
 from src.agents.shared_foundation import (
     build_foundation_agents, build_foundation_tasks, FOUNDATION_AGENT_NAMES,
 )
@@ -265,18 +267,20 @@ def _parse_crew_result(result, elapsed: float) -> AgentResponse:
         citation_raw = getattr(tasks_output[3], "raw", None) or str(tasks_output[3])
         try:
             ev_ctx = parse_evidence_context(citation_raw)
-            citations = [
+            citations = _enrich_citations_from_db(_dedup_citations([
                 Citation(
                     citation_code=c.citation_code,
                     source_type=c.source_type,
                     source_ref=c.source_ref,
                     citation_text=c.citation_text,
+                    open_url=c.open_url,
+                    bibliography_text=c.bibliography_text,
                 )
                 for c in ev_ctx.citations
-            ]
+            ]))
             evidence_summary = {
                 "total_evidence": len(ev_ctx.evidence_items),
-                "total_citations": len(ev_ctx.citations),
+                "total_citations": len(citations),
                 "total_claims": len(ev_ctx.claims),
                 "coverage_score": ev_ctx.coverage_report.coverage_score,
             }
@@ -299,6 +303,101 @@ def _parse_crew_result(result, elapsed: float) -> AgentResponse:
             **evidence_summary,
         },
     )
+
+
+def _dedup_citations(citations: list[Citation]) -> list[Citation]:
+    """Deduplicate citations by source_ref — keep the first occurrence per unique source."""
+    seen: dict[str, Citation] = {}
+    for c in citations:
+        key = c.source_ref.strip() or c.citation_code
+        if key not in seen:
+            seen[key] = c
+    return list(seen.values())
+
+
+def _enrich_citations_from_db(citations: list[Citation]) -> list[Citation]:
+    """Fill open_url and correct bibliography_text from document_registry.
+
+    Processes all citations. Lookup order:
+      1. Exact minio_path / file_path match on source_ref
+      2. Title-stem ILIKE match on source_ref
+      3. Author-keyword ILIKE match on apa_authors using first word of bibliography_text
+    Always overwrites bibliography_text with DB value (corrects LLM hallucinations).
+    """
+    if not citations:
+        return citations
+
+    try:
+        reg_map: dict[str, dict] = {}
+
+        # ── Pass 1: exact path match ──
+        source_refs = list({c.source_ref for c in citations if c.source_ref})
+        if source_refs:
+            ph = ",".join(["%s"] * len(source_refs))
+            rows = query_db(
+                f"SELECT * FROM document_registry WHERE minio_path IN ({ph}) OR file_path IN ({ph})",
+                source_refs + source_refs,
+            )
+            for row in rows:
+                for key in (row.get("minio_path", ""), row.get("file_path", "")):
+                    if key:
+                        reg_map[key] = row
+
+        # ── Pass 2: title-stem ILIKE on still-unmatched source_refs ──
+        unmatched_refs = [c.source_ref for c in citations if c.source_ref and c.source_ref not in reg_map]
+        for src in unmatched_refs:
+            stem = src.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            if len(stem) >= 4:
+                rows2 = query_db(
+                    "SELECT * FROM document_registry WHERE title ILIKE %s LIMIT 1",
+                    (f"%{stem}%",),
+                )
+                if rows2:
+                    reg_map[src] = rows2[0]
+
+        # ── Pass 3: author-keyword ILIKE for any citation still missing open_url ──
+        import re as _re
+        for c in citations:
+            if c.open_url:  # already resolved
+                continue
+            # Try bib-text author keyword
+            bib = (c.bibliography_text or c.citation_text or "").strip()
+            if not bib:
+                continue
+            # First word before comma/period/space = last name / org keyword
+            first_word = _re.split(r'[,\.\s]', bib)[0].strip()
+            if len(first_word) < 3:
+                continue
+            rows3 = query_db(
+                "SELECT * FROM document_registry "
+                "WHERE apa_authors ILIKE %s OR title ILIKE %s LIMIT 1",
+                (f"%{first_word}%", f"%{first_word}%"),
+            )
+            if rows3:
+                # Store under multiple keys for reliable lookup below
+                if c.source_ref:
+                    reg_map[c.source_ref] = rows3[0]
+                if c.citation_code:
+                    reg_map[c.citation_code] = rows3[0]
+                reg_map[bib[:40]] = rows3[0]
+
+        # ── Apply enrichment ──
+        for c in citations:
+            row = (
+                reg_map.get(c.source_ref)
+                or reg_map.get(c.citation_code or "")
+                or reg_map.get((c.bibliography_text or c.citation_text or "")[:40])
+            )
+            if row:
+                doc_id = row.get("document_id")
+                if doc_id:
+                    c.open_url = f"/api/documents/open/{doc_id}"
+                # Always overwrite bibliography_text from DB (correct LLM hallucinations)
+                c.bibliography_text = format_apa_reference(row)
+    except Exception as exc:
+        logger.debug("_enrich_citations_from_db failed: %s", exc)
+
+    return citations
 
 
 def _extract_charts_from_result(result) -> list[ChartSpec]:

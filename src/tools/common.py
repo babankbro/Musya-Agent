@@ -54,6 +54,24 @@ def search_documents(topic: str, keywords: str, n_results: int = 5) -> str:
         except Exception:
             pass  # graceful fallback — no APA enrichment
 
+        # Second pass: for any sources still unmatched, try title-stem lookup
+        unmatched = [s for s in source_set if s not in registry_map]
+        if unmatched:
+            try:
+                for source in unmatched:
+                    # Extract bare filename stem (e.g. "accident/report.pdf" → "report")
+                    stem = source.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                    if len(stem) < 4:
+                        continue  # too short to be meaningful
+                    rows2 = query_db(
+                        "SELECT * FROM document_registry WHERE title ILIKE %s LIMIT 1",
+                        (f"%{stem}%",),
+                    )
+                    if rows2:
+                        registry_map[source] = rows2[0]
+            except Exception:
+                pass
+
     # Deduplicate by source: merge chunks from same file
     seen: dict[str, dict] = {}  # source -> merged evidence item
     for r in results:

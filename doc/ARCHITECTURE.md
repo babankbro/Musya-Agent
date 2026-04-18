@@ -1,8 +1,8 @@
 # เอกสารสถาปัตยกรรมระบบ (System Architecture Document)
 # Musya Agent — AI Backend สำหรับวิเคราะห์ข้อมูลสุขภาพ
 
-> **เวอร์ชัน**: 2.0  
-> **วันที่**: 2026-04-13  
+> **เวอร์ชัน**: 2.1  
+> **วันที่**: 2026-04-16  
 > **ผู้อ่านเป้าหมาย**: Developer ใหม่ที่เข้ามาทำงานกับโปรเจกต์  
 > **ขอบเขต**: Agent backend + แผนการย้ายความสามารถจาก Chat-
 
@@ -12,7 +12,7 @@
 
 ### 1.1 วัตถุประสงค์
 เอกสารฉบับนี้อธิบายสถาปัตยกรรมของ **Musya Agent** ซึ่งเป็น backend AI service ที่:
-1. ให้บริการ multi-agent pipeline (CrewAI) สำหรับวิเคราะห์ข้อมูลสุขภาพสาธารณะ (Phase 1: 6 agents, Phase 2: 7-8 agents พร้อม Citation & Evidence)
+1. ให้บริการ multi-agent pipeline (CrewAI) สำหรับวิเคราะห์ข้อมูลสุขภาพสาธารณะ — 10 agents (Router + 9 sequential), 2 pipelines (Chat + Policy Brief)
 2. ให้บริการ Document RAG + Database RAG
 3. **Citation & Evidence Layer** — trust layer ที่ทำให้รายงานตรวจสอบย้อนกลับถึงแหล่งข้อมูลต้นทางได้
 4. **รองรับความสามารถที่ย้ายมาจาก Chat- frontend** (tool detection, API planning, domain queries)
@@ -34,13 +34,9 @@ Phase 0 (เดิม):
 
 Phase 1 (ปัจจุบัน):
   Chat- → เรียก Agent backend ผ่าน proxy (Agent Mode)
-  Agent → 6-agent pipeline สำหรับ accident domain
-
-Phase 2A (แผน — Citation & Evidence):
-  Agent → เพิ่ม Citation & Evidence Agent ใน pipeline (trust layer)
-  Agent → evidence registry + claim mapping + coverage validation
-  Agent → open_url contract สำหรับคลิกกลับไปเอกสารต้นฉบับ
-  รายละเอียด: ดู Agent/doc/CITATION_EVIDENCE_AGENT.md
+  Agent → 10-agent pipeline (Router + 9 sequential) สำหรับ Chat
+  Agent → 9-agent pipeline สำหรับ Policy Brief
+  Agent → Citation & Evidence, ThaiJO, NotebookLM ✅ Implemented
 
 Phase 2B (แผน — ย้ายจาก Chat-):
   Chat- → เรียก Agent backend สำหรับทุก AI operation
@@ -80,7 +76,7 @@ Phase 2B (แผน — ย้ายจาก Chat-):
    │             FastAPI — port 8000                  │
    │                                                  │
    │  ┌─────────────────────────────────────────────┐ │
-   │  │  ★ Agent Pipeline (6 agents, CrewAI)         │ │
+   │  │  ★ Agent Pipeline (10 agents, CrewAI)        │ │
    │  │  ★ AI Utility APIs (detect, plan, select)    │ │
    │  │  ★ Domain Query APIs (accident, diabetes, …) │ │
    │  │  ★ Document Management (ingest, search, APA) │ │
@@ -121,7 +117,7 @@ Phase 2B (แผน — ย้ายจาก Chat-):
 | Framework | FastAPI 0.115+ / Uvicorn |
 | Language | Python 3.12 |
 | Agent | CrewAI 1.1.0+ (sequential process) |
-| LLM | Google Gemini 2.0 Flash (via litellm) |
+| LLM | Google Gemini — Fast: 2.0 Flash, Pro: 2.5 Pro (via litellm) |
 | DB | PostgreSQL 16 (asyncpg + psycopg2) |
 | Vector Store | pgvector 0.8+ (PostgreSQL extension, `document_embeddings` table) |
 | Storage | MinIO 7.2+ |
@@ -134,20 +130,24 @@ Phase 2B (แผน — ย้ายจาก Chat-):
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                  FastAPI Routers (API Layer)               │
-│  chat.py | health.py | ingest.py | test_ui.py             │
-│  ★ Phase 2: ai_utils.py | domain.py | document.py         │
+│                  FastAPI Routers (API Layer) — 10 routers   │
+│  chat.py | health.py | ingest.py | evidence.py | upload.py │
+│  documents.py | citation.py | policy_brief.py | thaijo.py  │
+│  test_ui.py                                                │
 ├──────────────────────────────────────────────────────────┤
-│                  Orchestrator (CrewAI)                      │
-│  orchestrator.py — Crew builder, run_chat(), result parser │
+│                  Orchestrators (CrewAI)                     │
+│  orchestrator.py (Chat) | policy_orchestrator.py (Policy)  │
+│  unified_orchestrator.py (Auto-routing)                    │
 ├──────────────────────────────────────────────────────────┤
-│                  6 Agents (Sequential Pipeline)            │
-│  request_interpreter → retrieval → sql_specialist          │
-│  → analyst_accident → chart_builder → report_writer        │
+│                  10 Agents (Router + 9 Sequential)         │
+│  request_router → request_interpreter → retrieval →        │
+│  sql_specialist → citation_evidence → analyst_accident →   │
+│  chart_builder → research_synthesizer → deep_analyst →     │
+│  report_writer                                             │
 ├──────────────────────────────────────────────────────────┤
-│                  Tools (20+ functions)                      │
-│  accident.py (7) | chart_builder.py (7)                    │
-│  common.py (3)   | sql_tools.py (3)                        │
+│                  Tools (25+ functions)                      │
+│  accident.py (7) | chart_builder.py (7) | thaijo.py (1)   │
+│  common.py (3)   | sql_tools.py (3)     | notebooklm.py(2)│
 ├──────────────────────────────────────────────────────────┤
 │                  RAG Layer                                  │
 │  document_rag.py | vector_store.py | database_rag.py       │
@@ -157,14 +157,14 @@ Phase 2B (แผน — ย้ายจาก Chat-):
 │  MinIO (minio_client.py)                                   │
 ├──────────────────────────────────────────────────────────┤
 │                  Schemas (Pydantic Models)                  │
-│  request.py | response.py                                  │
+│  request.py | response.py | evidence.py | policy_brief.py  │
 ├──────────────────────────────────────────────────────────┤
 │                  Config                                     │
 │  config.py (pydantic Settings → .env)                      │
 └──────────────────────────────────────────────────────────┘
 ```
 
-### 3.3 CrewAI 6-Agent Pipeline
+### 3.3 CrewAI 10-Agent Pipeline (Chat)
 
 ระบบใช้ `Process.sequential` — แต่ละ agent ต้องใช้ context จาก agent ก่อนหน้า:
 
@@ -172,68 +172,72 @@ Phase 2B (แผน — ย้ายจาก Chat-):
 User Message
   │
   ▼
-┌─────────────────────────────────────────┐
-│ Agent 1: Request Interpreter            │
-│ • แปลความคำขอ → structured JSON        │
-│ • Output: topics, geography, time_range │
-│ • Tools: ไม่มี (LLM only)              │
-└───────┬──────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Agent 0: Request Router          [Fast LLM]  │
+│ • เลือก pipeline: chat / policy_brief        │
+└───────┬──────────────────────────────────┘
         ▼
-┌─────────────────────────────────────────┐
-│ Agent 2: Data Retrieval Specialist      │
-│ • ค้นข้อมูลจาก Document RAG + DB       │
-│ • Tools (10):                           │
-│   search_documents, get_indicator_catalog│
-│   get_geography_profile,                │
-│   get_province_year_summary,            │
-│   get_province_roads,                   │
-│   get_all_provinces_ranking,            │
-│   get_accident_summary,                 │
-│   get_accident_hotspots,                │
-│   get_accident_time_distribution,       │
-│   get_road_condition_risk               │
-└───────┬──────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Agent 1: Request Interpreter     [Fast LLM]  │
+│ • แปลความคำขอ → structured JSON             │
+│ • Output: topics, geography, time_range      │
+└───────┬──────────────────────────────────┘
         ▼
-┌─────────────────────────────────────────┐
-│ Agent 3: SQL Database Specialist        │
-│ • เขียน/รัน custom SQL query           │
-│ • Safety: SELECT/WITH only, LIMIT 1000 │
-│ • Full schema knowledge ฝังใน prompt    │
-│ • Tools (2):                            │
-│   execute_custom_sql, explain_schema    │
-└───────┬──────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Agent 2: Data Retrieval          [Fast LLM]  │
+│ • ค้นข้อมูลจาก Document RAG + DB + ThaiJO   │
+│ • Tools (11): search_documents,              │
+│   get_indicator_catalog, get_geography_profile│
+│   + 7 accident tools + search_thaijo         │
+└───────┬──────────────────────────────────┘
         ▼
-┌─────────────────────────────────────────┐
-│ Agent 4: Accident Data Analyst          │
-│ • วิเคราะห์ข้อมูล สังเคราะห์ findings  │
-│ • Output: key_findings, trends,         │
-│   risk_areas, recommended_actions       │
-│ • Tools: ไม่มี (ใช้ context)            │
-└───────┬──────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Agent 3: SQL Specialist          [Fast LLM]  │
+│ • เขียน/รัน custom SQL (SELECT/WITH only)    │
+│ • Tools (3): execute_custom_sql,             │
+│   explain_schema, get_table_row_count        │
+└───────┬──────────────────────────────────┘
         ▼
-┌─────────────────────────────────────────┐
-│ Agent 5: Report Chart Builder           │
-│ • สร้าง ChartSpec JSON สำหรับ Chart.js  │
-│ • Tools (7):                            │
-│   build_province_year_trend_chart,      │
-│   build_province_roads_bar_chart,       │
-│   build_accident_trend_chart,           │
-│   build_hotspot_bar_chart,              │
-│   build_time_distribution_chart,        │
-│   build_road_condition_pie_chart,       │
-│   build_monthly_death_bar_chart         │
-└───────┬──────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Agent 4: Citation & Evidence     [Fast LLM]  │
+│ • Normalize evidence, APA citations          │
+│ • Tools (4): list_all_documents_apa,         │
+│   lookup_document_apa, register_evidence,    │
+│   register_claim_links                       │
+└───────┬──────────────────────────────────┘
         ▼
-┌─────────────────────────────────────────┐
-│ Agent 6: Health Report Writer           │
-│ • เรียบเรียงรายงานภาษาไทย Markdown     │
-│ • โครงสร้าง:                            │
-│   สรุปสาระสำคัญ → สถานการณ์ปัจจุบัน →  │
-│   ข้อค้นพบ → พื้นที่/กลุ่มเสี่ยง →     │
-│   ข้อเสนอเชิงมาตรการ → ข้อจำกัด →      │
-│   คำถามติดตาม 3 ข้อ                    │
-│ • Tools: ไม่มี (ใช้ context)            │
-└───────┬──────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Agent 5: Accident Analyst        [Pro LLM]   │
+│ • วิเคราะห์ข้อมูล, Haddon Matrix            │
+│ • Tools: ไม่มี (ใช้ context)                 │
+└───────┬──────────────────────────────────┘
+        ▼
+┌──────────────────────────────────────────────┐
+│ Agent 6: Chart Builder           [Pro LLM]   │
+│ • สร้าง ChartSpec JSON สำหรับ Chart.js       │
+│ • Tools (7): build_*_chart (7 types)         │
+└───────┬──────────────────────────────────┘
+        ▼
+┌──────────────────────────────────────────────┐
+│ Agent 7: Research Synthesizer    [Pro LLM]   │
+│ • Narrative prose (1,200-2,000 คำ)           │
+│ • 4 blocks: สถานการณ์, ปัจจัยเสี่ยง,        │
+│   เปรียบเทียบ, บทเรียน                      │
+└───────┬──────────────────────────────────┘
+        ▼
+┌──────────────────────────────────────────────┐
+│ Agent 8: Deep Analyst            [Pro LLM]   │
+│ • Root cause, policy gaps (1,000-1,500 คำ)   │
+│ • 4 dimensions: Root Cause, Policy Gap,      │
+│   Systemic Barriers, Recommendations         │
+└───────┬──────────────────────────────────┘
+        ▼
+┌──────────────────────────────────────────────┐
+│ Agent 9: Report Composer         [Pro LLM]   │
+│ • รายงานภาษาไทยระดับราชการ (2,000-4,000 คำ) │
+│ • สรุป → สถานการณ์ → ข้อค้นพบ → เสี่ยง →    │
+│   มาตรการ → ข้อจำกัด → คำถามติดตาม 3 ข้อ    │
+└───────┬──────────────────────────────────┘
         ▼
 AgentResponse {content, charts, tables, citations, follow_ups, metadata}
 ```
@@ -295,27 +299,51 @@ Agent/
 ├── src/                            # Main application source code
 │   ├── main.py                     # FastAPI entrypoint, lifespan, CORS, routers
 │   ├── config.py                   # Pydantic Settings (env-based config)
-│   ├── agents/                     # CrewAI agent definitions
-│   │   ├── orchestrator.py         # Crew builder, run_chat(), result parsing
-│   │   ├── request_interpreter.py  # ตีความคำขอผู้ใช้ → structured JSON
-│   │   ├── retrieval.py            # ค้นข้อมูลจาก Document RAG + DB tools
-│   │   ├── sql_specialist.py       # เขียน/รัน custom SQL (schema-aware)
-│   │   ├── analyst_accident.py     # วิเคราะห์ข้อมูลอุบัติเหตุ
-│   │   ├── chart_builder.py        # สร้าง ChartSpec JSON สำหรับ frontend
-│   │   └── report_writer.py        # เขียนรายงานภาษาไทย Markdown
-│   ├── tools/                      # CrewAI tool functions (@tool decorator)
+│   ├── agents/                     # CrewAI agent definitions (21 files)
+│   │   ├── orchestrator.py         # Chat Crew builder, run_chat()
+│   │   ├── shared_foundation.py    # Shared LLM config, agent/task factories
+│   │   ├── request_router.py       # Agent 0: Pipeline routing
+│   │   ├── request_interpreter.py  # Agent 1: ตีความคำขอ → JSON
+│   │   ├── retrieval.py            # Agent 2: Doc RAG + DB + ThaiJO
+│   │   ├── sql_specialist.py       # Agent 3: Custom SQL
+│   │   ├── citation_evidence.py    # Agent 4: APA citations
+│   │   ├── analyst_accident.py     # Agent 5: Accident analysis
+│   │   ├── chart_builder.py        # Agent 6: ChartSpec JSON
+│   │   ├── research_synthesizer.py # Agent 7: Narrative prose
+│   │   ├── deep_analyst.py         # Agent 8: Root cause / policy gaps
+│   │   ├── report_writer.py        # Agent 9: Thai report
+│   │   ├── policy_orchestrator.py  # Policy Brief Crew builder
+│   │   ├── unified_orchestrator.py # Unified routing
+│   │   ├── nlm_data_fetcher.py     # NotebookLM data fetcher
+│   │   ├── policy_rti.py           # RTI domain analyst
+│   │   ├── policy_mental.py        # Mental health analyst
+│   │   ├── policy_ncd.py           # NCD analyst
+│   │   ├── policy_report_writer.py # Policy Brief report writer
+│   │   ├── progress.py             # SSE progress tracking
+│   │   └── __init__.py
+│   ├── tools/                      # CrewAI tool functions (6 files)
 │   │   ├── accident.py             # 7 accident data query tools
 │   │   ├── chart_builder.py        # 7 chart-building tools
 │   │   ├── common.py               # search_documents, get_indicator_catalog, etc.
-│   │   └── sql_tools.py            # execute_custom_sql, explain_schema
-│   ├── routers/                    # FastAPI route handlers
-│   │   ├── chat.py                 # POST /api/chat, POST /api/chat/stream
+│   │   ├── sql_tools.py            # execute_custom_sql, explain_schema, get_table_row_count
+│   │   ├── thaijo.py               # search_thaijo (TCI-THAIJO academic search)
+│   │   └── notebooklm.py           # nlm_ask, get_supported_provinces
+│   ├── routers/                    # FastAPI route handlers (10 files)
+│   │   ├── chat.py                 # /api/chat, /api/chat/unified, /api/chat/stream
 │   │   ├── health.py               # GET /api/health
 │   │   ├── ingest.py               # POST /api/ingest
+│   │   ├── evidence.py             # /api/evidence/*, /api/documents/open
+│   │   ├── upload.py               # /api/documents/upload
+│   │   ├── documents.py            # CRUD /api/documents, MinIO browse
+│   │   ├── citation.py             # /api/citations/*
+│   │   ├── policy_brief.py         # /api/policy-brief
+│   │   ├── thaijo.py               # /api/thaijo/*
 │   │   └── test_ui.py              # Test UI routes
 │   ├── schemas/                    # Pydantic request/response models
 │   │   ├── request.py              # ChatRequest, ReportRequest
-│   │   └── response.py             # AgentResponse, ChartSpec, TableSpec, Citation
+│   │   ├── response.py             # AgentResponse, ChartSpec, TableSpec, Citation
+│   │   ├── evidence.py             # EvidenceItem, Claim, CoverageReport
+│   │   └── policy_brief.py         # PolicyBriefRequest/Response
 │   ├── rag/                        # RAG layer
 │   │   ├── document_rag.py         # PDF/DOCX extraction, chunking, ingestion, search
 │   │   ├── vector_store.py         # pgvector client (psycopg2 + Gemini embeddings), add/search documents
@@ -327,10 +355,20 @@ Agent/
 │   ├── 001_shared_core.sql         # dim_geography, dim_time, dim_source, etc.
 │   ├── 002_document_rag.sql        # document_registry, indicator_catalog (document_chunks dropped in 014)
 │   ├── 003_accident_domain.sql     # fact_accident_event, fact_accident_person, marts
-│   ├── 004-009_*.sql               # Enhancement migrations
-│   ├── 011_pgvector.sql            # pgvector extension + document_embeddings table (vector(3072))
-│   ├── import_csv_all_years.py     # CSV import script
-│   └── accident20XX.csv            # Raw accident CSV data
+│   ├── 004_seed_accident_mockup.sql  # Mock data seeding
+│   ├── 005_enhance_road_geo.sql      # Alters dim_road_segment
+│   ├── 006_province_marts.sql        # mart_province_year, mart_province_road
+│   ├── 007_all_years_province.sql    # csv_year, serious_injured, views
+│   ├── 008_prevent_duplicates.sql    # UNIQUE constraints
+│   ├── 009_add_coordinates.sql       # lat/lon to events
+│   ├── 010_evidence_citation.sql     # evidence_registry, claim_evidence_link
+│   ├── 011_pgvector.sql              # document_embeddings (vector(3072))
+│   ├── 012_document_upload_enhanced.sql # Upload + APA fields
+│   ├── 013_apa_approval_status.sql   # apa_approval_status column
+│   ├── 014_populate_document_chunks.sql # Drops old document_chunks
+│   ├── 015_thaijo_evidence.sql       # ThaiJO columns in evidence_registry
+│   ├── import_csv_all_years.py       # CSV import script
+│   └── accident20XX.csv              # Raw accident CSV data
 ├── doc/                            # Documentation
 ├── tests/                          # pytest test suite
 ├── static/                         # Static files (test UI HTML)
@@ -475,32 +513,55 @@ POST /api/external/thaijo
 
 ### 4.3 Phase 2 Directory Structure (เป้าหมาย)
 
+> **Note**: หลายส่วนถูก implement แล้ว (evidence, upload, documents, citation, policy_brief, thaijo routers)
+
 ```
 Agent/src/
 ├── main.py
 ├── config.py
-├── agents/                     # CrewAI agents (existing)
-│   ├── orchestrator.py
-│   ├── request_interpreter.py
-│   ├── retrieval.py
-│   ├── sql_specialist.py
-│   ├── analyst_accident.py
-│   ├── chart_builder.py
-│   └── report_writer.py
-├── tools/                      # CrewAI tools (existing)
-│   ├── accident.py
-│   ├── chart_builder.py
-│   ├── common.py
-│   └── sql_tools.py
-├── routers/                    # FastAPI routes
-│   ├── chat.py                 # (existing) Agent pipeline
-│   ├── health.py               # (existing) Health check
-│   ├── ingest.py               # (existing) Document ingestion
-│   ├── test_ui.py              # (existing) Test UI
-│   ├── ai_utils.py             # ★ NEW: Tool detect, API plan, file select, SQL gen
-│   ├── domain.py               # ★ NEW: NL→SQL queries, table CRUD, CSV import
-│   ├── document.py             # ★ NEW: APA extraction, bulk APA
-│   └── external.py             # ★ NEW: Weather, ThaiJO
+├── agents/                     # CrewAI agents (21 files — ✅ implemented)
+│   ├── orchestrator.py         # Chat pipeline
+│   ├── shared_foundation.py    # Shared LLM config
+│   ├── request_router.py       # Agent 0: Pipeline routing
+│   ├── request_interpreter.py  # Agent 1
+│   ├── retrieval.py            # Agent 2 (+ ThaiJO)
+│   ├── sql_specialist.py       # Agent 3
+│   ├── citation_evidence.py    # Agent 4
+│   ├── analyst_accident.py     # Agent 5
+│   ├── chart_builder.py        # Agent 6
+│   ├── research_synthesizer.py # Agent 7
+│   ├── deep_analyst.py         # Agent 8
+│   ├── report_writer.py        # Agent 9
+│   ├── policy_orchestrator.py  # Policy Brief pipeline
+│   ├── unified_orchestrator.py # Unified routing
+│   ├── nlm_data_fetcher.py     # NotebookLM
+│   ├── policy_rti.py           # RTI analyst
+│   ├── policy_mental.py        # Mental health analyst
+│   ├── policy_ncd.py           # NCD analyst
+│   ├── policy_report_writer.py # Policy Brief writer
+│   ├── progress.py             # SSE progress
+│   └── __init__.py
+├── tools/                      # CrewAI tools (6 files — ✅ implemented)
+│   ├── accident.py             # 7 accident tools
+│   ├── chart_builder.py        # 7 chart tools
+│   ├── common.py               # 3 common tools
+│   ├── sql_tools.py            # 3 SQL tools
+│   ├── thaijo.py               # search_thaijo
+│   └── notebooklm.py           # nlm_ask, get_supported_provinces
+├── routers/                    # FastAPI routes (10 files — ✅ implemented)
+│   ├── chat.py                 # /api/chat, /unified, /stream
+│   ├── health.py               # /api/health
+│   ├── ingest.py               # /api/ingest
+│   ├── evidence.py             # /api/evidence/*, /api/documents/open
+│   ├── upload.py               # /api/documents/upload
+│   ├── documents.py            # CRUD /api/documents, MinIO browse
+│   ├── citation.py             # /api/citations/*
+│   ├── policy_brief.py         # /api/policy-brief
+│   ├── thaijo.py               # /api/thaijo/*
+│   ├── test_ui.py              # Test UI
+│   ├── ai_utils.py             # ★ PLANNED: Tool detect, API plan, file select, SQL gen
+│   ├── domain.py               # ★ PLANNED: NL→SQL queries, table CRUD, CSV import
+│   └── external.py             # ★ PLANNED: Weather
 ├── services/                   # ★ NEW: Business logic services
 │   ├── ai_service.py           # Gemini interactions (detect, plan, SQL gen, APA)
 │   ├── domain_service.py       # NL→SQL execution, table operations
@@ -520,10 +581,12 @@ Agent/src/
 │   ├── prompt_deep_research.py
 │   └── prompt_step_read.py
 ├── schemas/                    # Pydantic models
-│   ├── request.py              # (existing)
-│   ├── response.py             # (existing)
-│   ├── ai_schemas.py           # ★ NEW: DetectToolRequest/Response, etc.
-│   └── domain_schemas.py       # ★ NEW: DomainQueryRequest/Response, etc.
+│   ├── request.py              # ChatRequest, ReportRequest
+│   ├── response.py             # AgentResponse, ChartSpec, Citation
+│   ├── evidence.py             # ✅ EvidenceItem, Claim, CoverageReport
+│   ├── policy_brief.py         # ✅ PolicyBriefRequest/Response
+│   ├── ai_schemas.py           # ★ PLANNED: DetectToolRequest/Response
+│   └── domain_schemas.py       # ★ PLANNED: DomainQueryRequest/Response
 ├── rag/                        # RAG layer (existing)
 ├── db/                         # Database connectivity (existing)
 └── __init__.py
@@ -795,8 +858,8 @@ Browser                Chat-/ChatV1         Agent Backend        PostgreSQL     
 
 | เอกสาร | ตำแหน่ง | เนื้อหา |
 |--------|---------|---------|
-| Agent SRS | `Agent/doc/SRS.md` | ข้อกำหนดความต้องการ |
-| Agent Database & API | `Agent/doc/DATABASE_API.md` | ฐานข้อมูลและ API reference |
+| Agent Project Docs | `Agent/doc/PROJECT_DOCUMENTATION.md` | ข้อกำหนดความต้องการและ overview |
+| Agent Database & API | `Agent/doc/DATABASE_API_REFERENCE.md` | ฐานข้อมูลและ API reference |
 | Agent Project Docs | `Agent/doc/PROJECT_DOCUMENTATION.md` | เอกสารโปรเจกต์ |
 | Agent RAG Design | `Agent/doc/Agentic_AI_RAG_Design.md` | RAG system design |
 | Agent SQL Specialist | `Agent/doc/SQL_SPECIALIST_AGENT.md` | SQL agent documentation |

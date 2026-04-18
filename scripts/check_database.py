@@ -126,7 +126,7 @@ async def check_tables():
         
         # Document RAG tables (Migration 002)
         "document_registry",
-        "document_chunks",
+        "document_embeddings",
         
         # Accident domain tables (Migration 003)
         "fact_accident_event",

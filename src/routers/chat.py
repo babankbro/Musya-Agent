@@ -8,8 +8,10 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from src.schemas.request import ChatRequest
 from src.schemas.response import AgentResponse
+from src.schemas.short_chat import ShortChatRequest, ShortChatResponse
 from src.agents.orchestrator import run_chat
 from src.agents.unified_orchestrator import run_unified, run_unified_with_progress
+from src.agents.short_chat_orchestrator import run_short_chat, run_short_chat_with_progress
 from src.agents.progress import (
     create_progress_queue, remove_progress_queue, get_pipeline_agents
 )
@@ -61,6 +63,7 @@ async def chat_unified(request: ChatRequest):
         result = run_unified(
             user_message=request.message,
             session_id=request.session_id,
+            mode=request.mode,
         )
         return JSONResponse(content=result)
     except Exception as e:
@@ -106,6 +109,7 @@ async def chat_stream(request: ChatRequest):
                 request.message,
                 request.session_id,
                 request_id,
+                request.mode,
             )
 
             # Poll for progress events while pipeline runs
@@ -141,6 +145,96 @@ async def chat_stream(request: ChatRequest):
         except Exception as e:
             logger.error(f"Stream failed: {e}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            remove_progress_queue(request_id)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/api/chat/short", response_model=ShortChatResponse)
+async def chat_short(request: ShortChatRequest):
+    """Short Chat endpoint — quick Q&A (~30-60s, 3 agents).
+
+    Returns a concise 500-1,000 word answer with inline citations.
+    """
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    logger.info("💬 Short chat request: %s", request.message[:80])
+
+    try:
+        result = run_short_chat(
+            user_message=request.message,
+            session_id=request.session_id,
+        )
+        return result
+    except Exception as e:
+        logger.error("Short chat failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Short chat failed: {str(e)}")
+
+
+@router.post("/api/chat/short/stream")
+async def chat_short_stream(request: ShortChatRequest):
+    """Short Chat SSE streaming — real-time progress + result.
+
+    Event types: start, agent_progress, content, done
+    """
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    request_id = str(uuid.uuid4())
+
+    async def event_generator():
+        import concurrent.futures
+        import queue as sync_queue
+
+        progress_queue = create_progress_queue(request_id)
+
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'message': '💬 กำลังตอบคำถาม...', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+
+            loop = asyncio.get_event_loop()
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+            future = loop.run_in_executor(
+                executor,
+                run_short_chat_with_progress,
+                request.message,
+                request.session_id,
+                request_id,
+            )
+
+            while not future.done():
+                try:
+                    event = progress_queue.get_nowait()
+                    yield f"data: {json.dumps({'type': 'agent_progress', 'data': asdict(event)}, ensure_ascii=False)}\n\n"
+                except sync_queue.Empty:
+                    pass
+                await asyncio.sleep(0.1)
+
+            # Drain remaining
+            while True:
+                try:
+                    event = progress_queue.get_nowait()
+                    yield f"data: {json.dumps({'type': 'agent_progress', 'data': asdict(event)}, ensure_ascii=False)}\n\n"
+                except sync_queue.Empty:
+                    break
+
+            result = future.result()
+            yield f"data: {json.dumps({'type': 'content', 'data': result.model_dump()}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'pipeline': 'short_chat'}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error("Short chat stream failed: %s", e, exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
         finally:
             remove_progress_queue(request_id)
 

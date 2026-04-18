@@ -901,7 +901,7 @@ IDs เป็น sequential per session — reset ทุก chat session ให�
 | เอกสาร | ตำแหน่ง |
 |--------|---------|
 | Agent Architecture | `Agent/doc/ARCHITECTURE.md` |
-| Agent SRS | `Agent/doc/SRS.md` |
+| Agent Workflow | `Agent/doc/AGENT_WORKFLOW_UNIFIED.md` |
 | Agent DB & API Reference | `Agent/doc/DATABASE_API_REFERENCE.md` |
 | Agent Project Documentation | `Agent/doc/PROJECT_DOCUMENTATION.md` |
 | Agent SQL Specialist | `Agent/doc/SQL_SPECIALIST_AGENT.md` |

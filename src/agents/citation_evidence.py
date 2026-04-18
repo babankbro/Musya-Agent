@@ -41,9 +41,39 @@ CITATION_EVIDENCE_PROMPT = """คุณคือ Citation & Evidence Agent — �
 - **เว็บไซต์**: [C-003] หรือ ({หน่วยงาน}, {ปี})
 
 ### กฎการจัดลำดับ Citation Code
-- C-001 ถึง C-099: รายงานตรวจราชการ (notebooklm_pdf) — เรียงตาม topic: RTI → Mental → NCD
+- C-001 ถึง C-099: รายงานตรวจราชการ (notebooklm_pdf / document) — เรียงตาม topic: RTI → Mental → NCD
 - C-100 ถึง C-199: ฐานข้อมูล (database)
-- C-200 ถึง C-299: เว็บไซต์/เอกสารภายนอก
+- **C-200 ถึง C-299: บทความวิชาการ ThaiJO (thaijo_article)** — เรียงตามลำดับที่พบ
+- C-300+: เว็บไซต์/เอกสารภายนอกอื่น ๆ
+
+## ThaiJO Article Evidence (C-200 to C-299)
+
+เมื่อ Retrieval Agent เรียก search_thaijo และได้รับผลลัพธ์ ให้:
+
+1. **Normalize เป็น EvidenceItem**:
+   - `evidence_type`: `"thaijo_article"`
+   - `apa_type`: `"article"`
+   - `trust_level`: `"medium"`
+   - `source_ref`: ใช้ `pdf_url` ของบทความ
+   - `title`: สกัดจาก `reference` (ชื่อบทความก่อนจุด) หรือจาก `summary` บรรทัดแรก
+   - `open_url`: ใช้ `pdf_url` โดยตรง (ลิงค์ TCI-THAIJO เปิดได้ทันที)
+   - `text_snippet`: ใช้ `summary` (ย่อไว้ที่ 500 อักขระ)
+   - `apa_authors`, `apa_year`, `apa_publisher`: สกัดจาก `reference` ถ้ามี
+
+2. **Citation Code**: ใช้ range **C-200 ถึง C-299**
+   - C-200: ThaiJO article แรก, C-201: article ที่สอง ฯลฯ
+
+3. **APA Citation**:
+   - ถ้ามี `reference` field (ไม่ใช่ null): ใช้เป็น `bibliography_text` โดยตรง — ข้อมูลนี้มาจาก TCI-THAIJO โดยตรง เชื่อถือได้
+   - ถ้า `reference` เป็น null: ให้สร้าง: `"[ไม่ระบุผู้แต่ง]. (ไม่ระบุปี). *[title]*. ThaiJO. {pdf_url}"`
+   - **ห้ามแต่งข้อมูล** เช่น ชื่อผู้แต่ง ปี หรือเลขหน้า ถ้าไม่มีใน reference
+
+4. **open_url**: ใช้ `pdf_url` จาก ThaiJO โดยตรง (ไม่ใช่ /api/documents/open/)
+   - ตัวอย่าง: `"https://he01.tci-thaijo.org/index.php/.../view/..."`
+
+5. **Source notes**: `"ที่มา: บทความวิชาการจาก ThaiJO [C-200]"`
+
+6. **Deduplication**: บทความ pdf_url เดียวกัน = citation_code เดียว
 
 ## Phase 3 Extension — NotebookLM PDF Sources
 
@@ -61,7 +91,7 @@ CITATION_EVIDENCE_PROMPT = """คุณคือ Citation & Evidence Agent — �
 จากข้อมูลที่ได้จาก Retrieval Agent, SQL Specialist หรือ NLM Data Fetcher ให้ดำเนินการ:
 
 1. **Normalize Evidence**: แปลงผลลัพธ์ทั้งหมดให้เป็น evidence items ที่มี metadata ครบถ้วน
-   - ระบุ evidence_type (document / database / api / notebooklm_pdf)
+   - ระบุ evidence_type (document / database / api / notebooklm_pdf / **thaijo_article**)
    - ระบุ source_ref, title, page_ref, section_label
    - กำหนด trust_level (high / medium / low)
    - สร้าง original_url และ open_url
@@ -148,12 +178,136 @@ CITATION_EVIDENCE_PROMPT = """คุณคือ Citation & Evidence Agent — �
 }
 ```
 
-**สำคัญ**: ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON"""
+**สำคัญมาก — ปฏิบัติตามลำดับนี้เท่านั้น**:
+1. **เรียก `list_all_documents_apa` ก่อนเสมอ** เพื่อดูรายชื่อเอกสารทั้งหมดในระบบพร้อม bibliography_text และ open_url ที่ถูกต้อง
+2. สำหรับ source_ref ที่ยังไม่พบใน list ให้เรียก `lookup_document_apa(source_ref)` เพิ่มเติม
+3. **ห้ามแต่งหรือเดา bibliography_text** — ต้องใช้ค่าจากฐานข้อมูลเท่านั้น
+   ถ้าไม่พบเอกสารในระบบ ให้ใส่ `"bibliography_text": ""` และ `"open_url": ""` ไว้ก่อน
+4. **ห้ามใส่ (Unpublished manuscript) หรือ placeholder** ในกรณีที่ไม่แน่ใจ
+5. **ห้ามซ้ำ**: เอกสาร 1 ไฟล์ = citation_code 1 รหัส
+6. ทุก citation ที่พบใน document_registry ต้องมี open_url = "/api/documents/open/{document_id}"
+7. ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON"""
 
 
 # ---------------------------------------------------------------------------
 # CrewAI tools for the Citation Agent
 # ---------------------------------------------------------------------------
+
+@tool("lookup_document_apa")
+def lookup_document_apa(source_ref: str) -> str:
+    """Look up APA metadata for a document from document_registry.
+
+    Searches by: file_path, minio_path, title (exact then fuzzy),
+    and apa_authors keyword match. Always use this tool before writing
+    any bibliography_text — never guess or invent APA citations.
+
+    Args:
+        source_ref: Filename, MinIO path, title, or author surname of the document.
+
+    Returns:
+        JSON with document_id, open_url, bibliography_text (correct APA 7th),
+        and all apa_* metadata fields.
+    """
+    from src.utils.apa_formatter import format_apa_reference
+
+    def _make_result(doc: dict) -> str:
+        doc_id = doc.get("document_id")
+        return json.dumps({
+            "found": True,
+            "document_id": doc_id,
+            "title": doc.get("title", ""),
+            "apa_type": doc.get("apa_type", "report"),
+            "apa_authors": doc.get("apa_authors", ""),
+            "apa_year": doc.get("apa_year", ""),
+            "apa_publisher": doc.get("apa_publisher", ""),
+            "open_url": f"/api/documents/open/{doc_id}" if doc_id else "",
+            "bibliography_text": format_apa_reference(doc),
+            "source_ref": source_ref,
+        }, ensure_ascii=False)
+
+    try:
+        # Pass 1: exact match on path / title
+        rows = query_db(
+            "SELECT * FROM document_registry "
+            "WHERE file_path = %s OR minio_path = %s OR title = %s "
+            "LIMIT 1",
+            (source_ref, source_ref, source_ref),
+        )
+        if rows:
+            return _make_result(rows[0])
+
+        # Pass 2: fuzzy match on filename stem and title
+        filename = source_ref.rsplit("/", 1)[-1] if "/" in source_ref else source_ref
+        rows = query_db(
+            "SELECT * FROM document_registry "
+            "WHERE file_path ILIKE %s OR minio_path ILIKE %s OR title ILIKE %s "
+            "LIMIT 1",
+            (f"%{filename}%", f"%{filename}%", f"%{filename}%"),
+        )
+        if rows:
+            return _make_result(rows[0])
+
+        # Pass 3: author-keyword match (first meaningful word of source_ref)
+        import re as _re
+        first_word = _re.split(r'[,\.\s/]', source_ref.strip())[0].strip()
+        if len(first_word) >= 3:
+            rows = query_db(
+                "SELECT * FROM document_registry "
+                "WHERE apa_authors ILIKE %s OR title ILIKE %s "
+                "LIMIT 1",
+                (f"%{first_word}%", f"%{first_word}%"),
+            )
+            if rows:
+                return _make_result(rows[0])
+
+    except Exception as e:
+        return json.dumps({"error": f"DB error: {e}"}, ensure_ascii=False)
+
+    return json.dumps({"found": False, "source_ref": source_ref}, ensure_ascii=False)
+
+
+@tool("list_all_documents_apa")
+def list_all_documents_apa() -> str:
+    """Return ALL documents in document_registry with their APA metadata and open_url.
+
+    Call this FIRST before generating any citations, to get the authoritative
+    list of all available documents with correct APA text and PDF links.
+    Never invent bibliography_text — always use the values returned by this tool.
+
+    Returns:
+        JSON array of {document_id, title, apa_authors, apa_year, open_url,
+        bibliography_text, source_ref} for every registered document.
+    """
+    from src.utils.apa_formatter import format_apa_reference
+
+    try:
+        rows = query_db(
+            "SELECT * FROM document_registry "
+            "WHERE file_path IS NOT NULL OR minio_path IS NOT NULL "
+            "ORDER BY topic, apa_year DESC NULLS LAST, title",
+            [],
+        )
+    except Exception as e:
+        return json.dumps({"error": f"DB error: {e}"}, ensure_ascii=False)
+
+    docs = []
+    for doc in rows:
+        doc_id = doc.get("document_id")
+        docs.append({
+            "document_id": doc_id,
+            "title": doc.get("title", ""),
+            "topic": doc.get("topic", ""),
+            "apa_authors": doc.get("apa_authors", ""),
+            "apa_year": doc.get("apa_year", ""),
+            "apa_publisher": doc.get("apa_publisher", ""),
+            "apa_type": doc.get("apa_type", "report"),
+            "open_url": f"/api/documents/open/{doc_id}" if doc_id else "",
+            "bibliography_text": format_apa_reference(doc),
+            "source_ref": doc.get("minio_path") or doc.get("file_path") or "",
+        })
+
+    return json.dumps({"total": len(docs), "documents": docs}, ensure_ascii=False)
+
 
 @tool("register_evidence")
 def register_evidence(evidence_json: str) -> str:
@@ -282,7 +436,7 @@ def create_citation_evidence_agent(llm: str) -> Agent:
             "เพื่อให้รายงานสุดท้ายมีความน่าเชื่อถือ ลด hallucination "
             "และผู้ใช้สามารถคลิกกลับไปดูเอกสารต้นฉบับได้จริง"
         ),
-        tools=[register_evidence, register_claim_links],
+        tools=[list_all_documents_apa, lookup_document_apa, register_evidence, register_claim_links],
         llm=llm,
         verbose=True,
         max_iter=8,
@@ -390,6 +544,36 @@ def parse_evidence_context(raw_output: str) -> EvidenceContext:
             ))
         except Exception as e:
             logger.warning("Skipping malformed citation: %s", e)
+
+    # ── Cross-reference: copy open_url / bibliography_text from evidence_items ──
+    # search_documents already enriched evidence_items with correct DB values.
+    # If the LLM hallucinated bibliography_text or left open_url blank in citations,
+    # overwrite them here using the linked evidence_item (matched by evidence_id).
+    ev_map: dict[str, EvidenceItem] = {e.evidence_id: e for e in ctx.evidence_items if e.evidence_id}
+    for cit in ctx.citations:
+        ev = ev_map.get(cit.evidence_id)
+        if ev and ev.evidence_type != "thaijo_article":
+            # Always prefer source_ref from evidence (the actual minio_path)
+            if ev.source_ref and not cit.source_ref:
+                cit.source_ref = ev.source_ref
+            # Overwrite open_url with evidence value if blank or missing
+            if ev.open_url and not cit.open_url:
+                cit.open_url = ev.open_url
+            # Overwrite bibliography_text with DB-formatted value (kills hallucinations)
+            # ev.open_url being set means evidence came from document_registry
+            if ev.open_url:
+                from src.utils.apa_formatter import format_apa_reference as _fmt
+                # Re-derive from evidence APA fields if they are set
+                ev_row = {
+                    "apa_authors": ev.apa_authors,
+                    "apa_year": ev.apa_year,
+                    "apa_publisher": ev.apa_publisher,
+                    "apa_type": ev.apa_type,
+                    "title": ev.title,
+                }
+                db_bib = _fmt(ev_row)
+                if db_bib:
+                    cit.bibliography_text = db_bib
 
     # Parse coverage
     cov = data.get("coverage", {})

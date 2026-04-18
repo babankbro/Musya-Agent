@@ -60,7 +60,7 @@ class TestParseCrewResult:
         assert resp.content == str(MockResult())
         assert resp.topic == "accident"
         assert resp.metadata["elapsed_seconds"] == 5.0
-        assert resp.metadata["agent_count"] == 4
+        assert resp.metadata["agent_count"] == 9
         assert len(resp.follow_ups) >= 1
 
 
