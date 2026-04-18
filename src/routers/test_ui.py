@@ -22,6 +22,7 @@ class ToolRequest(BaseModel):
     province_name: str = ""
     keywords: str = ""
     topic: str = "accident"
+    n_results: int = 5
 
 
 class SQLRequest(BaseModel):
@@ -79,7 +80,7 @@ async def test_geography(req: ToolRequest):
 @router.post("/tool/search_documents")
 async def test_search_documents(req: ToolRequest):
     from src.tools.common import search_documents
-    result = search_documents.run(topic=req.topic, keywords=req.keywords or "อุบัติเหตุ")
+    result = search_documents.run(topic=req.topic, keywords=req.keywords or "อุบัติเหตุ", n_results=req.n_results)
     return _thai_json({"tool": "search_documents", "result": result})
 
 

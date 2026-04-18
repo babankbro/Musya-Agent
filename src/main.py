@@ -101,6 +101,7 @@ async def root():
         "version": "0.1.0",
         "docs": "/docs",
         "test_ui": "/test",
+        "doc_agents": "/doc-agents",
     }
 
 
@@ -113,12 +114,30 @@ async def test_ui_page():
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
 
 
+@app.get("/doc-agents")
+async def doc_agents_ui_page():
+    """Serve the Document Agents Test UI."""
+    import pathlib
+    from fastapi.responses import HTMLResponse
+    html_path = pathlib.Path(__file__).parent.parent / "static" / "document_agent_test_ui.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
 @app.get("/documents")
 async def document_upload_ui_page():
     """Serve the Document & Citation Manager UI."""
     import pathlib
     from fastapi.responses import HTMLResponse
     html_path = pathlib.Path(__file__).parent.parent / "static" / "document_upload_ui.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@app.get("/unified")
+async def unified_test_ui_page():
+    """Serve the Unified Test UI (all 3 pipelines)."""
+    import pathlib
+    from fastapi.responses import HTMLResponse
+    html_path = pathlib.Path(__file__).parent.parent / "static" / "unified_test_ui.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
 
 
