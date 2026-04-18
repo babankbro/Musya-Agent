@@ -127,7 +127,11 @@ def build_foundation_tasks(
         "**ขั้นตอนที่ 4: รวบรวมข้อมูลพื้นที่ถ้าจำเป็น**\n"
         "   - เรียก get_geography_profile, get_accident_hotspots ถ้ามีการถามเรื่องพื้นที่\n\n"
         "⚠️ ขั้นตอนที่ 1 ครั้งที่ 1 ต้องส่ง keywords เป็นคำขอต้นฉบับเต็มประโยคเสมอ\n"
-        "   เพื่อให้ embedding search จับความหมายได้ครบถ้วนที่สุด\n"
+        "   เพื่อให้ embedding search จับความหมายได้ครบถ้วนที่สุด\n\n"
+        "**ขั้นตอนที่ 5 (academic_search_needed): เรียก search_thaijo เมื่อจำเป็น**\n"
+        "   - ถ้า Request Interpreter ระบุ academic_search_needed=true → ต้องเรียก search_thaijo ทันที\n"
+        "   - ใช้ search_keywords จากผลการตีความ (หรือสกัดคำสำคัญเองถ้าไม่มี)\n"
+        "   - ผลลัพธ์ ThaiJO จะถูกส่งต่อให้ Citation Agent สร้าง C-200..C-299 citations\n"
     )
 
     if include_nlm and province:

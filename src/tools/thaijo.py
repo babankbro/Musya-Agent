@@ -81,6 +81,7 @@ def search_thaijo(
     # Two-tier timeout strategy:
     # 1. Try a quick search (20s) for responsiveness.
     # 2. If results < 5 or times out, try a deeper search (THAIJO_TIMEOUT, e.g. 120s).
+    # All exceptions are caught and returned as graceful error JSON — never re-raised.
     data = None
     try:
         logger.info("ThaiJO: Attempting quick search (20s)...")
@@ -89,44 +90,31 @@ def search_thaijo(
         if len(results) >= 5:
             logger.info("ThaiJO: Quick search successful with %s results", len(results))
         else:
-            logger.info("ThaiJO: Quick search returned only %s results, retrying with full timeout...", len(results))
+            logger.info(
+                "ThaiJO: Quick search returned only %s results, retrying with full timeout...",
+                len(results),
+            )
             data = _do_search(float(settings.THAIJO_TIMEOUT))
-    except (httpx.TimeoutException, httpx.HTTPError) as e:
-        logger.warning("ThaiJO: Quick search failed/timed out (%s), retrying with full timeout (%ss)...", type(e).__name__, settings.THAIJO_TIMEOUT)
+    except httpx.TimeoutException as e:
+        logger.warning(
+            "ThaiJO: timed out (%s), retrying with full timeout (%ss)...",
+            type(e).__name__,
+            settings.THAIJO_TIMEOUT,
+        )
         try:
             data = _do_search(float(settings.THAIJO_TIMEOUT))
+        except httpx.TimeoutException:
+            logger.warning("ThaiJO: final timeout after %ss: term=%r", settings.THAIJO_TIMEOUT, term)
+            return json.dumps(
+                {"count": 0, "results": [], "error": "ThaiJO search timed out"},
+                ensure_ascii=False,
+            )
         except Exception as final_exc:
-            # Re-raise or handle if the second attempt also fails
-            raise final_exc
-
-    try:
-        count = data.get("count", 0)
-        results = data.get("results", [])
-        logger.info("ThaiJO final results: count=%s for term=%r", count, term)
-
-        enriched = []
-        for article in results:
-            enriched.append({
-                "pdf_url": article.get("pdf_url", ""),
-                "summary": article.get("summary", ""),
-                "reference": article.get("reference"),
-                "source_type": "thaijo_article",
-                "trust_level": "medium",
-                "apa_type": "article",
-                "search_term": term,
-            })
-
-        return json.dumps(
-            {"count": len(enriched), "results": enriched},
-            ensure_ascii=False,
-        )
-
-    except httpx.TimeoutException:
-        logger.warning("ThaiJO timeout after %ss: term=%r", settings.THAIJO_TIMEOUT, term)
-        return json.dumps(
-            {"count": 0, "results": [], "error": "ThaiJO search timed out"},
-            ensure_ascii=False,
-        )
+            logger.warning("ThaiJO: final attempt failed (%s): term=%r", type(final_exc).__name__, term)
+            return json.dumps(
+                {"count": 0, "results": [], "error": f"ThaiJO unavailable: {type(final_exc).__name__}"},
+                ensure_ascii=False,
+            )
     except httpx.HTTPStatusError as e:
         logger.warning("ThaiJO HTTP %s: %s term=%r", e.response.status_code, repr(e), term)
         return json.dumps(
@@ -142,6 +130,28 @@ def search_thaijo(
     except Exception as e:
         logger.exception("ThaiJO unexpected error: %s", repr(e))
         return json.dumps(
-            {"count": 0, "results": [], "error": "ThaiJO search failed"},
+            {"count": 0, "results": [], "error": f"ThaiJO search failed: {type(e).__name__}"},
             ensure_ascii=False,
         )
+
+    # Process successful response
+    count = data.get("count", 0)
+    results = data.get("results", [])
+    logger.info("ThaiJO final results: count=%s for term=%r", count, term)
+
+    enriched = []
+    for article in results:
+        enriched.append({
+            "pdf_url": article.get("pdf_url", ""),
+            "summary": article.get("summary", ""),
+            "reference": article.get("reference"),
+            "source_type": "thaijo_article",
+            "trust_level": "medium",
+            "apa_type": "article",
+            "search_term": term,
+        })
+
+    return json.dumps(
+        {"count": len(enriched), "results": enriched},
+        ensure_ascii=False,
+    )

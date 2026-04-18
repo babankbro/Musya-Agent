@@ -347,6 +347,130 @@ class TestParseEvidenceContext:
         assert len(ctx.evidence_items) == 1
         assert len(ctx.citations) == 0
 
+    def test_malformed_evidence_item_skipped_others_parsed(self):
+        """Malformed evidence item is skipped; rest of items are still parsed."""
+        raw = json.dumps({
+            "evidence_items": [
+                {"evidence_id": "EV-OK", "evidence_type": "document", "source_ref": "good.pdf"},
+                {"INVALID_FIELD": True},          # malformed — no evidence_id or type
+                {"evidence_id": "EV-OK2", "evidence_type": "database", "source_ref": "mart_x"},
+            ],
+            "claims": [],
+            "citations": [],
+        })
+        ctx = parse_evidence_context(raw)
+        # The two valid items must be present; the malformed one is silently skipped
+        evidence_ids = [e.evidence_id for e in ctx.evidence_items]
+        assert "EV-OK" in evidence_ids
+        assert "EV-OK2" in evidence_ids
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 2b. parse_evidence_context — cross-reference overwrite tests
+# ═══════════════════════════════════════════════════════════════════
+
+class TestParseEvidenceContextCrossReference:
+    """Cross-reference guard: evidence_items overwrite hallucinated citation fields."""
+
+    def _make_raw(
+        self,
+        evidence_type: str,
+        evidence_open_url: str,
+        citation_open_url: str,
+        citation_bib: str,
+    ) -> str:
+        """Build minimal JSON linking one evidence item to one citation."""
+        return json.dumps({
+            "evidence_items": [{
+                "evidence_id": "EV-001",
+                "evidence_type": evidence_type,
+                "source_ref": "test.pdf",
+                "title": "Test Document",
+                "trust_level": "high",
+                "open_url": evidence_open_url,
+                "apa_type": "report",
+                "apa_authors": "สสจ.เชียงใหม่",
+                "apa_year": "2567",
+                "apa_publisher": "กระทรวงสาธารณสุข",
+            }],
+            "claims": [],
+            "citations": [{
+                "citation_code": "C-001",
+                "evidence_id": "EV-001",
+                "source_type": evidence_type,
+                "source_ref": "test.pdf",
+                "citation_text": "(สสจ.เชียงใหม่, 2567)",
+                "bibliography_text": citation_bib,
+                "open_url": citation_open_url,
+                "trust_level": "high",
+            }],
+            "coverage": {"total_claims": 0, "supported": 0, "coverage_score": 1.0, "flags": []},
+        }, ensure_ascii=False)
+
+    def test_blank_citation_open_url_overwritten_from_evidence(self):
+        """Test E: citation.open_url is blank, evidence.open_url is set → overwrite."""
+        raw = self._make_raw(
+            evidence_type="document",
+            evidence_open_url="/api/documents/open/42",
+            citation_open_url="",
+            citation_bib="Some bib.",
+        )
+        ctx = parse_evidence_context(raw)
+        assert ctx.citations[0].open_url == "/api/documents/open/42"
+
+    def test_hallucinated_bibliography_overwritten_by_apa_formatter(self):
+        """Test F: evidence.open_url is set → bibliography_text re-derived from APA formatter."""
+        raw = self._make_raw(
+            evidence_type="document",
+            evidence_open_url="/api/documents/open/42",
+            citation_open_url="/api/documents/open/42",
+            citation_bib="HALLUCINATED WRONG BIBLIOGRAPHY",
+        )
+        with patch("src.utils.apa_formatter.format_apa_reference") as mock_fmt:
+            mock_fmt.return_value = "สสจ.เชียงใหม่. (2567). *รายงานตรวจราชการ*. กระทรวงสาธารณสุข."
+            ctx = parse_evidence_context(raw)
+
+        bib = ctx.citations[0].bibliography_text
+        assert bib != "HALLUCINATED WRONG BIBLIOGRAPHY"
+        assert "สสจ.เชียงใหม่" in bib
+
+    def test_thaijo_evidence_bibliography_not_overwritten(self):
+        """Test G: thaijo_article evidence is excluded from overwrite guard."""
+        original_bib = "สมชาย ใจดี. (2567). บทความวิชาการ. วารสาร, 10(1), 1-10."
+        raw = self._make_raw(
+            evidence_type="thaijo_article",
+            evidence_open_url="https://he01.tci-thaijo.org/view/123",
+            citation_open_url="https://he01.tci-thaijo.org/view/123",
+            citation_bib=original_bib,
+        )
+        with patch("src.utils.apa_formatter.format_apa_reference") as mock_fmt:
+            mock_fmt.return_value = "SHOULD NOT BE USED"
+            ctx = parse_evidence_context(raw)
+
+        # ThaiJO bibliography must be preserved exactly
+        assert ctx.citations[0].bibliography_text == original_bib
+
+    def test_citation_with_no_linked_evidence_is_unchanged(self):
+        """Citation whose evidence_id has no match in evidence_items is left as-is."""
+        raw = json.dumps({
+            "evidence_items": [],   # empty — no match
+            "claims": [],
+            "citations": [{
+                "citation_code": "C-001",
+                "evidence_id": "EV-MISSING",
+                "source_type": "document",
+                "source_ref": "orphan.pdf",
+                "citation_text": "test",
+                "bibliography_text": "Orphan Bib.",
+                "open_url": "",
+                "trust_level": "low",
+            }],
+            "coverage": {"total_claims": 0, "supported": 0, "coverage_score": 1.0, "flags": []},
+        })
+        ctx = parse_evidence_context(raw)
+        assert ctx.citations[0].bibliography_text == "Orphan Bib."
+        assert ctx.citations[0].open_url == ""
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 3. search_documents Tool — Structured Output Tests

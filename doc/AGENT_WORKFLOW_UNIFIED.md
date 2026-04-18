@@ -193,8 +193,8 @@ Pipeline → Retrieval Agent → search_thaijo → ThaiJO API (port 8505)
 |----------|-------|
 | **Role** | Data Retrieval Specialist |
 | **Goal** | ค้นหาข้อมูลจาก Document RAG (pgvector) และฐานข้อมูล PostgreSQL |
-| **Tools** | 10 tools: search_documents, get_indicator_catalog, get_geography_profile, get_accident_summary, get_accident_hotspots, get_accident_time_distribution, get_road_condition_risk, get_province_year_summary, get_province_roads, get_all_provinces_ranking |
-| **Policy mode** | +2 tools: `nlm_ask`, `get_supported_provinces` (NLM tools auto-added via `include_nlm=True`) |
+| **Tools** | 11 tools: `search_documents`, `get_indicator_catalog`, `get_geography_profile`, `get_province_year_summary`, `get_province_roads`, `get_all_provinces_ranking`, `get_accident_summary`, `get_accident_hotspots`, `get_accident_time_distribution`, `get_road_condition_risk`, `search_thaijo` (tool 11) |
+| **Policy mode** | +2 tools: `NotebookLM Ask Tool`, `Get Supported Provinces` (NLM tools auto-added via `include_nlm=True`) → 13 tools total |
 | **File** | `src/agents/retrieval.py` |
 
 ### Agent 3 — SQL Specialist
@@ -203,7 +203,7 @@ Pipeline → Retrieval Agent → search_thaijo → ThaiJO API (port 8505)
 |----------|-------|
 | **Role** | SQL Specialist |
 | **Goal** | เขียน SQL query เพื่อดึงข้อมูลสำหรับกราฟหรือการวิเคราะห์พิเศษ |
-| **Tools** | execute_sql |
+| **Tools** | `execute_custom_sql`, `explain_schema` |
 | **File** | `src/agents/sql_specialist.py` |
 
 ### Agent 4 — Citation & Evidence Agent
@@ -212,7 +212,7 @@ Pipeline → Retrieval Agent → search_thaijo → ThaiJO API (port 8505)
 |----------|-------|
 | **Role** | Citation & Evidence Agent |
 | **Goal** | ตรวจสอบหลักฐาน สร้าง APA 7th Edition citation ประเมินความน่าเชื่อถือ |
-| **Tools** | `lookup_document_apa`, `register_evidence`, `register_claim_links` |
+| **Tools** | `list_all_documents_apa`, `lookup_document_apa`, `register_evidence`, `register_claim_links` |
 | **Output** | JSON: evidence_items, claims, citations (with open_url + bibliography_text), reference_list, coverage_report |
 | **Policy mode** | +APA metadata for NotebookLM sources (apa_type, apa_authors, apa_year, apa_publisher) |
 | **File** | `src/agents/citation_evidence.py` |
@@ -548,7 +548,7 @@ Agent/
 | Component | Chat Pipeline | Policy Brief Pipeline | Short Chat Pipeline |
 |-----------|:---:|:---:|:---:|
 | Request Interpreter | Agent 1 | Agent 1 (identical) | SC-1 (identical) |
-| Data Retrieval Agent | Agent 2 (10 tools) | Agent 2 (10 tools + 2 NLM tools) | SC-2 (3 tools, minimal) |
+| Data Retrieval Agent | Agent 2 (11 tools) | Agent 2 (11 tools + 2 NLM tools = 13) | SC-2 (3 tools, minimal) |
 | **ThaiJO Subsystem** | **Tool 11 ✅** | **Tool 11 ✅** | **Optional ✅** |
 | SQL Specialist | Agent 3 | Agent 3 (identical) | ❌ ข้าม |
 | Citation & Evidence | Agent 4 | Agent 4 (+APA metadata for NLM sources) | ❌ ข้าม (inline only) |
