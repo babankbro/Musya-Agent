@@ -144,7 +144,10 @@ async def chat_stream(request: ChatRequest):
 
         except Exception as e:
             logger.error(f"Stream failed: {e}", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            err_msg = str(e)
+            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                err_msg = "⚠️ ระบบใช้งานเกินโกตรา (Rate Limit) — กรุณารอสักครู่แล้วลองใหม่ (30 วินาที)"
+            yield f"data: {json.dumps({'type': 'error', 'message': err_msg}, ensure_ascii=False)}\n\n"
         finally:
             remove_progress_queue(request_id)
 
@@ -234,7 +237,10 @@ async def chat_short_stream(request: ShortChatRequest):
 
         except Exception as e:
             logger.error("Short chat stream failed: %s", e, exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+            err_msg = str(e)
+            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                err_msg = "⚠️ ระบบใช้งานเกินโกตรา (Rate Limit) — กรุณารอสักครู่แล้วลองใหม่ (30 วินาที)"
+            yield f"data: {json.dumps({'type': 'error', 'message': err_msg}, ensure_ascii=False)}\n\n"
         finally:
             remove_progress_queue(request_id)
 

@@ -1,5 +1,6 @@
 """SQL Specialist Agent: Expert in accident database schema and custom SQL queries."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 SQL_SPECIALIST_PROMPT = """
 คุณเป็นผู้เชี่ยวชาญด้านฐานข้อมูลอุบัติเหตุ มีความรู้ลึกซึ้งเกี่ยวกับโครงสร้างฐานข้อมูล (schema) และสามารถเขียน SQL query ที่ซับซ้อนได้
@@ -209,7 +210,7 @@ ORDER BY province_name, year_no;
 
 def create_sql_specialist(llm) -> Agent:
     """Create SQL specialist agent with database schema knowledge."""
-    from src.tools.sql_tools import execute_custom_sql, explain_schema
+    from src.tools.sql_tools import execute_custom_sql, explain_schema, get_table_row_count
     
     return Agent(
         role="SQL Database Specialist",
@@ -218,8 +219,10 @@ def create_sql_specialist(llm) -> Agent:
         tools=[
             execute_custom_sql,
             explain_schema,
+            get_table_row_count,
         ],
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        **agent_retry_kwargs(),
     )

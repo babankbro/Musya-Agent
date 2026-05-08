@@ -3,6 +3,7 @@
 FR-TJR-006: เรียบเรียงรายงานทบทวนวรรณกรรมภาษาไทย
 """
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 from src.tools.chart_builder import (
     build_accident_trend_chart,
@@ -47,6 +48,7 @@ def create_thaijo_report_composer(llm) -> Agent:
         verbose=True,
         allow_delegation=False,
         max_iter=12,
+        **agent_retry_kwargs(),
     )
 
 

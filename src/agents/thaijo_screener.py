@@ -3,6 +3,7 @@
 FR-TJR-003: คัดกรองความเกี่ยวข้องของบทความ
 """
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 
 def create_thaijo_screener(llm) -> Agent:
@@ -23,6 +24,7 @@ def create_thaijo_screener(llm) -> Agent:
         verbose=True,
         allow_delegation=False,
         max_iter=8,
+        **agent_retry_kwargs(),
     )
 
 
@@ -75,8 +77,12 @@ THAIJO_SCREENER_PROMPT = """
     "screened_articles": [
         {{
             "pdf_url": "...",
+            "title": "copy จาก Searcher — ห้ามแก้",
             "summary": "...",
             "reference": "..." หรือ null,
+            "apa_authors": "copy จาก Searcher — ห้ามแก้",
+            "apa_year": "copy จาก Searcher — ห้ามแก้",
+            "apa_journal": "copy จาก Searcher — ห้ามแก้",
             "relevance_score": 8.5,
             "relevance_reason": "เหตุผลสั้นๆ",
             "themes": ["พฤติกรรมเสี่ยง", "มอเตอร์ไซค์"],
@@ -92,6 +98,8 @@ THAIJO_SCREENER_PROMPT = """
 ```
 
 ⚠️ สำคัญ:
+- ห้ามแก้ค่า pdf_url, title, apa_authors, apa_year, apa_journal — copy ตรงจาก Searcher output
+  ค่าเหล่านี้ pre-extracted จาก tool แล้ว ถ้า Searcher ให้ null ให้คง null ไว้
 - Include อย่างน้อย 5 บทความ (ถ้ามี)
 - ระบุ themes ของทุกบทความที่ included
 - ห้ามแต่งข้อมูลที่ไม่อยู่ใน summary

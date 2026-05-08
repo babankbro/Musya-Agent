@@ -13,6 +13,7 @@ Usage:
 import logging
 
 from crewai import Agent, Task
+from src.agents.agent_defaults import agent_retry_kwargs
 
 from src.agents.request_interpreter import create_request_interpreter, REQUEST_INTERPRETER_PROMPT
 from src.agents.retrieval import create_retrieval_agent
@@ -268,29 +269,27 @@ def _create_retrieval_agent(
             llm=llm,
             verbose=True,
             allow_delegation=False,
+            **agent_retry_kwargs(),
         )
 
     # Full mode: use the standard retrieval agent
-    agent = create_retrieval_agent(llm)
-
-    # ThaiJO is already included in create_retrieval_agent (tool 11)
-    # If include_thaijo=False, remove it
-    if not include_thaijo:
-        from src.tools.thaijo import search_thaijo as _thaijo_tool
-        agent.tools = [t for t in agent.tools if t is not _thaijo_tool]
+    extra_tools = []
+    extra_backstory = ""
 
     if include_nlm:
         from src.tools.notebooklm import nlm_ask, get_supported_provinces
 
-        # Extend the agent's tools list with NLM tools
-        agent.tools = list(agent.tools) + [nlm_ask, get_supported_provinces]
-
-        # Extend backstory with NLM context
-        agent.backstory += (
-            "\n\nนอกจากนี้ คุณยังสามารถดึงข้อมูลจากรายงานตรวจราชการสาธารณสุข "
+        extra_tools = [nlm_ask, get_supported_provinces]
+        extra_backstory = (
+            "นอกจากนี้ คุณยังสามารถดึงข้อมูลจากรายงานตรวจราชการสาธารณสุข "
             "ผ่าน NotebookLM ได้ โดยใช้เครื่องมือ nlm_ask(province, topic, notebook_id) "
             "สำหรับ 3 หัวข้อ: RTI (อุบัติเหตุ), Mental Health (สุขภาพจิต), NCD (โรคไม่ติดต่อ) "
             f"จังหวัดเป้าหมาย: {province}, notebook_id: {notebook_id}"
         )
 
-    return agent
+    return create_retrieval_agent(
+        llm=llm,
+        extra_tools=extra_tools,
+        extra_backstory=extra_backstory,
+        include_thaijo=include_thaijo,
+    )

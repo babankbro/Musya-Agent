@@ -25,6 +25,7 @@ from src.agents.citation_evidence import parse_evidence_context
 from src.agents.policy_report_writer import create_policy_report_writer, POLICY_REPORT_WRITER_PROMPT
 from src.schemas.response import Citation
 from src.agents.progress import emit_progress
+from src.agents.agent_defaults import kickoff_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ def run_policy_brief(
     )
 
     try:
-        result = crew.kickoff()
+        result = kickoff_with_retry(crew)
         elapsed = time.time() - start_time
         logger.info("Policy Brief crew completed in %.1fs", elapsed)
         return _build_response(result, province, topics, year, notebook_id, elapsed, all_tasks)
@@ -296,6 +297,13 @@ def _build_response(result, province: str, topics: list[str], year: int,
                 )
                 for c in ev_ctx.citations
             ]))
+            # Citation guard: log ThaiJO URLs cleared by _verify_thaijo_url_in_cache (RC-6 fix)
+            thaijo_cleared = [c for c in citations if c.source_type == "thaijo_article" and not c.open_url]
+            if thaijo_cleared:
+                logger.warning(
+                    "Citation guard: %d ThaiJO citation(s) had URLs cleared (hallucination detected)",
+                    len(thaijo_cleared),
+                )
         except Exception as exc:
             logger.warning("Could not parse citations: %s", exc)
 
@@ -634,7 +642,7 @@ def run_policy_brief_with_progress(
     )
 
     try:
-        result = crew.kickoff()
+        result = kickoff_with_retry(crew)
         elapsed = time.time() - start_time
         logger.info("Policy Brief crew completed in %.1fs", elapsed)
         return _build_response(result, province, topics, year, notebook_id, elapsed, all_tasks)

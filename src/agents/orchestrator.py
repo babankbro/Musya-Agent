@@ -21,6 +21,7 @@ from src.agents.report_writer import create_report_writer, REPORT_WRITER_PROMPT
 from src.agents.chart_builder import create_chart_builder, CHART_BUILDER_PROMPT
 from src.schemas.response import AgentResponse, ChartSpec, TableSpec, Citation
 from src.agents.progress import emit_progress
+from src.agents.agent_defaults import kickoff_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +235,7 @@ def run_chat(user_message: str, session_id: str | None = None) -> AgentResponse:
     )
 
     try:
-        result = crew.kickoff()
+        result = kickoff_with_retry(crew)
         elapsed = time.time() - start_time
         logger.info(f"Crew completed in {elapsed:.1f}s")
 
@@ -278,6 +279,13 @@ def _parse_crew_result(result, elapsed: float) -> AgentResponse:
                 )
                 for c in ev_ctx.citations
             ]))
+            # Citation guard: log ThaiJO URLs cleared by _verify_thaijo_url_in_cache (RC-6 fix)
+            thaijo_cleared = [c for c in citations if c.source_type == "thaijo_article" and not c.open_url]
+            if thaijo_cleared:
+                logger.warning(
+                    "Citation guard: %d ThaiJO citation(s) had URLs cleared (hallucination detected)",
+                    len(thaijo_cleared),
+                )
             evidence_summary = {
                 "total_evidence": len(ev_ctx.evidence_items),
                 "total_citations": len(citations),
@@ -634,7 +642,7 @@ def run_chat_with_progress(
     )
 
     try:
-        result = crew.kickoff()
+        result = kickoff_with_retry(crew)
         elapsed = time.time() - start_time
         logger.info(f"Crew completed in {elapsed:.1f}s")
         return _parse_crew_result(result, elapsed)

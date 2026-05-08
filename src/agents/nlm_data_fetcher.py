@@ -4,6 +4,7 @@ import logging
 import time
 
 from crewai import Agent, Task
+from src.agents.agent_defaults import agent_retry_kwargs
 
 from src.tools.notebooklm import nlm_ask, get_supported_provinces, PROVINCE_NOTEBOOKS, QUERIES
 
@@ -145,6 +146,7 @@ def create_nlm_data_fetcher(llm: str) -> Agent:
         llm=llm,
         verbose=True,
         max_iter=10,
+        **agent_retry_kwargs(),
     )
 
 

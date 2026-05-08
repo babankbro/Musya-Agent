@@ -3,6 +3,7 @@
 FR-TJR-005: สังเคราะห์งานวิจัยเป็น thematic analysis
 """
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 
 def create_thaijo_research_synthesizer(llm) -> Agent:
@@ -26,6 +27,7 @@ def create_thaijo_research_synthesizer(llm) -> Agent:
         verbose=True,
         allow_delegation=False,
         max_iter=10,
+        **agent_retry_kwargs(),
     )
 
 

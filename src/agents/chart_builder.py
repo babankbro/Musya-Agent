@@ -9,6 +9,7 @@ Contract with frontend (ChatV1/app/components/chat/chatMessage/ChartRenderer.tsx
   Supported types: bar | line | pie | doughnut
 """
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 from src.tools.chart_builder import (
     build_accident_trend_chart,
     build_hotspot_bar_chart,
@@ -51,6 +52,7 @@ def create_chart_builder(llm) -> Agent:
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        **agent_retry_kwargs(),
     )
 
 

@@ -21,6 +21,10 @@ from src.db.pool import get_async_pool, close_async_pool, close_sync_pool
 from src.routers import health, chat, ingest, test_ui, evidence, upload, documents, citation, policy_brief
 from src.routers.thaijo import router as thaijo_router
 
+# Apply 429 backoff patch at module load time (before any request is handled)
+from src.agents.agent_defaults import _patch_gemini_429_backoff
+_patch_gemini_429_backoff()
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +52,10 @@ async def lifespan(app: FastAPI):
         logger.info(f"PostgreSQL pool connected to {s.DB_HOST}:{s.DB_PORT}/{s.DB_NAME}")
     except Exception as e:
         logger.error(f"Failed to connect to PostgreSQL: {e}")
+
+    # Patch Gemini LLM to sleep on 429 before re-raising (backoff for rate limit)
+    from src.agents.agent_defaults import _patch_gemini_429_backoff
+    _patch_gemini_429_backoff()
 
     logger.info(f"Agent server starting on {s.HOST}:{s.PORT}")
     yield
@@ -102,6 +110,7 @@ async def root():
         "docs": "/docs",
         "test_ui": "/test",
         "doc_agents": "/doc-agents",
+        "unified_test": "/unified-test",
     }
 
 
@@ -120,6 +129,15 @@ async def doc_agents_ui_page():
     import pathlib
     from fastapi.responses import HTMLResponse
     html_path = pathlib.Path(__file__).parent.parent / "static" / "document_agent_test_ui.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@app.get("/unified-test")
+async def unified_test_ui_page():
+    """Serve the Unified Test UI."""
+    import pathlib
+    from fastapi.responses import HTMLResponse
+    html_path = pathlib.Path(__file__).parent.parent / "static" / "unified_test_ui.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
 
 

@@ -1,5 +1,6 @@
 """Agent A6 — Policy Report Writer: produces separate per-domain reports."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 POLICY_REPORT_WRITER_PROMPT = """คุณคือ Policy Brief Report Writer ผู้เชี่ยวชาญด้านการสังเคราะห์นโยบายสาธารณสุข
 ตามรูปแบบรายงานตรวจราชการกระทรวงสาธารณสุข
@@ -259,4 +260,5 @@ def create_policy_report_writer(llm: str) -> Agent:
         llm=llm,
         verbose=True,
         max_iter=10,
+        **agent_retry_kwargs(),
     )

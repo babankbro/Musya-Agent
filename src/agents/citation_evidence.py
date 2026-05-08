@@ -6,6 +6,7 @@ from hashlib import sha256
 from datetime import datetime, timezone
 
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 from crewai.tools import tool
 
 from src.db.pool import query_db
@@ -48,32 +49,46 @@ CITATION_EVIDENCE_PROMPT = """คุณคือ Citation & Evidence Agent — �
 
 ## ThaiJO Article Evidence (C-200 to C-299)
 
+⚠️ **ขั้นตอนบังคับ**: ก่อนสร้าง evidence_item สำหรับ thaijo_article ทุกชิ้น ให้เรียก `lookup_thaijo_evidence(pdf_url=..., search_term=...)` เสมอ
+- ใช้ค่า `pdf_url`, `title`, `reference`, `apa_authors`, `apa_year`, `apa_journal` จาก tool output **โดยไม่แก้ไข**
+- `lookup_thaijo_evidence` ดึงข้อมูลจาก thaijo_search_cache โดยตรง — ค่าที่ได้คือ ground truth ห้ามเปลี่ยน
+
 เมื่อ Retrieval Agent เรียก search_thaijo และได้รับผลลัพธ์ ให้:
 
-1. **Normalize เป็น EvidenceItem**:
+1. **เรียก `lookup_thaijo_evidence` ก่อนทุกครั้ง**:
+   - `lookup_thaijo_evidence(pdf_url="<pdf_url จาก Searcher>", search_term="<คำค้นที่ใช้>")`
+   - ถ้า `found=True`: ใช้ค่าทุก field จาก tool output — **ห้ามแก้ไขหรือแต่งเพิ่มโดยเด็ดขาด**
+   - ถ้า `found=False`: ใส่ `open_url=""`, `source_ref=""` และ flag ว่าไม่พบ
+
+2. **Normalize เป็น EvidenceItem** (จากค่าที่ได้จาก `lookup_thaijo_evidence`):
    - `evidence_type`: `"thaijo_article"`
    - `apa_type`: `"article"`
    - `trust_level`: `"medium"`
-   - `source_ref`: ใช้ `pdf_url` ของบทความ
-   - `title`: สกัดจาก `reference` (ชื่อบทความก่อนจุด) หรือจาก `summary` บรรทัดแรก
-   - `open_url`: ใช้ `pdf_url` โดยตรง (ลิงค์ TCI-THAIJO เปิดได้ทันที)
-   - `text_snippet`: ใช้ `summary` (ย่อไว้ที่ 500 อักขระ)
-   - `apa_authors`, `apa_year`, `apa_publisher`: สกัดจาก `reference` ถ้ามี
+   - `source_ref`: ใช้ค่า `pdf_url` จาก tool output **verbatim** — ห้ามตัด ห้ามเพิ่ม ห้ามแก้ segment
+   - `original_url`: ใช้ค่า `pdf_url` จาก tool output **verbatim**
+   - `open_url`: ใช้ค่า `pdf_url` จาก tool output **verbatim** — URL อาจมีรูปแบบ `/view/ID`, `/view/ID/FILEID` ทั้งหมดถูกต้อง
+   - `title`: ใช้ `title` จาก tool output — ถ้า null → ใส่ `"[ชื่อบทความไม่ปรากฏ]"` เท่านั้น
+   - `text_snippet`: ใช้ `summary` **500 อักขระแรก** — ห้ามสร้างเนื้อหาใหม่
+   - `apa_authors`: ใช้ `apa_authors` จาก tool output (อาจเป็น null — ห้ามแต่ง)
+   - `apa_year`: ใช้ `apa_year` จาก tool output (อาจเป็น null — ห้ามแต่ง)
+   - `apa_publisher`: ใช้ `apa_journal` จาก tool output (อาจเป็น null)
 
-2. **Citation Code**: ใช้ range **C-200 ถึง C-299**
+3. **Citation Code**: ใช้ range **C-200 ถึง C-299**
    - C-200: ThaiJO article แรก, C-201: article ที่สอง ฯลฯ
 
-3. **APA Citation**:
-   - ถ้ามี `reference` field (ไม่ใช่ null): ใช้เป็น `bibliography_text` โดยตรง — ข้อมูลนี้มาจาก TCI-THAIJO โดยตรง เชื่อถือได้
-   - ถ้า `reference` เป็น null: ให้สร้าง: `"[ไม่ระบุผู้แต่ง]. (ไม่ระบุปี). *[title]*. ThaiJO. {pdf_url}"`
-   - **ห้ามแต่งข้อมูล** เช่น ชื่อผู้แต่ง ปี หรือเลขหน้า ถ้าไม่มีใน reference
+4. **APA Citation**:
+   - ถ้ามี `reference` จาก tool output (ไม่ใช่ null): ใช้เป็น `bibliography_text` โดยตรง
+   - ถ้า `reference` เป็น null: สร้าง: `"[ไม่ระบุผู้แต่ง]. (ไม่ระบุปี). *[title]*. ThaiJO. {pdf_url}"`
+   - **ห้ามแต่งข้อมูล** เช่น ชื่อผู้แต่ง ปี หรือเลขหน้า ถ้าไม่มีใน tool output
 
-4. **open_url**: ใช้ `pdf_url` จาก ThaiJO โดยตรง (ไม่ใช่ /api/documents/open/)
-   - ตัวอย่าง: `"https://he01.tci-thaijo.org/index.php/.../view/..."`
+5. **open_url**: ใช้ `pdf_url` จาก `lookup_thaijo_evidence` **verbatim** — ห้ามตัดหรือแก้ไข URL
+   - ตัวอย่างที่ถูกต้อง: `"https://he01.tci-thaijo.org/index.php/jnorthnurse/article/view/195524/135849"`
+   - ตัวอย่างที่ถูกต้อง: `"https://he01.tci-thaijo.org/index.php/jnat/article/view/250446"`
+   - ตัวอย่างที่ผิด: URL ที่คุณสร้างเองโดยไม่ได้รับมาจาก `lookup_thaijo_evidence`
 
-5. **Source notes**: `"ที่มา: บทความวิชาการจาก ThaiJO [C-200]"`
+6. **Source notes**: `"ที่มา: บทความวิชาการจาก ThaiJO [C-200]"`
 
-6. **Deduplication**: บทความ pdf_url เดียวกัน = citation_code เดียว
+7. **Deduplication**: บทความ pdf_url เดียวกัน = citation_code เดียว
 
 ## Phase 3 Extension — NotebookLM PDF Sources
 
@@ -333,6 +348,45 @@ def register_evidence(evidence_json: str) -> str:
         if not ev_id:
             continue
         try:
+            ev_type = item.get("evidence_type", "document")
+            open_url = item.get("open_url", "")
+
+            # ThaiJO: only convert /download/ links to /view/ — do NOT strip /view/ID/FILEID
+            # The cache stores /view/ID/FILEID as the correct URL; keep it verbatim.
+            if ev_type == "thaijo_article":
+                from src.tools.thaijo import _is_valid_thaijo_url
+                import re as _re
+
+                def _fix_download_only(url: str) -> str:
+                    """Convert /article/download/ID/FID → /article/view/ID only."""
+                    m = _re.match(
+                        r'^(https://(?:he0[1-9]\.)?tci-thaijo\.org/index\.php/[^/]+)'
+                        r'/article/download/(\d+)/\d+$', url
+                    )
+                    return f"{m.group(1)}/article/view/{m.group(2)}" if m else url
+
+                if open_url:
+                    open_url = _fix_download_only(open_url)
+                    item["open_url"] = open_url
+                src_ref = item.get("source_ref", "")
+                if src_ref:
+                    item["source_ref"] = _fix_download_only(src_ref)
+                orig_url = item.get("original_url", "")
+                if orig_url:
+                    item["original_url"] = _fix_download_only(orig_url)
+                # Verify URL against cache — clear if not found (prevents hallucinated URLs)
+                if open_url and _is_valid_thaijo_url(open_url):
+                    confirmed_url = _confirm_thaijo_url(
+                        open_url, item.get("thaijo_search_term", "")
+                    )
+                    if not confirmed_url:
+                        logger.warning(
+                            "register_evidence: ThaiJO open_url not confirmed, cleared: %r",
+                            open_url[:80],
+                        )
+                    item["open_url"] = confirmed_url
+                    open_url = confirmed_url
+
             query_db(
                 """INSERT INTO evidence_registry
                    (evidence_id, evidence_type, topic, source_ref, title,
@@ -343,7 +397,7 @@ def register_evidence(evidence_json: str) -> str:
                    ON CONFLICT (evidence_id) DO NOTHING""",
                 (
                     ev_id,
-                    item.get("evidence_type", "document"),
+                    ev_type,
                     item.get("topic", "general"),
                     item.get("source_ref", ""),
                     item.get("title", ""),
@@ -358,7 +412,7 @@ def register_evidence(evidence_json: str) -> str:
                     item.get("text_snippet", "")[:500],
                     item.get("trust_level", "medium"),
                     item.get("original_url", ""),
-                    item.get("open_url", ""),
+                    open_url,
                 ),
             )
             registered += 1
@@ -436,14 +490,221 @@ def create_citation_evidence_agent(llm: str) -> Agent:
             "เพื่อให้รายงานสุดท้ายมีความน่าเชื่อถือ ลด hallucination "
             "และผู้ใช้สามารถคลิกกลับไปดูเอกสารต้นฉบับได้จริง"
         ),
-        tools=[list_all_documents_apa, lookup_document_apa, register_evidence, register_claim_links],
+        tools=[list_all_documents_apa, lookup_document_apa, 
+               lookup_thaijo_evidence, register_evidence, register_claim_links],
         llm=llm,
         verbose=True,
         max_iter=8,
+        **agent_retry_kwargs(),
     )
 
 
 # ---------------------------------------------------------------------------
+# Tool: look up ThaiJO article from cache (ground-truth, no hallucination)
+# ---------------------------------------------------------------------------
+
+@tool("lookup_thaijo_evidence")
+def lookup_thaijo_evidence(pdf_url: str = "", search_term: str = "") -> str:
+    """Look up a ThaiJO article from the PostgreSQL search cache to get verified metadata.
+
+    Returns pdf_url, title, reference, apa_authors, apa_year, apa_journal EXACTLY as
+    stored in thaijo_search_cache — the cache is the ground truth, never modify the URL.
+
+    Args:
+        pdf_url:     ThaiJO article URL to look up (any form accepted).
+        search_term: Fallback keyword if pdf_url is not in cache.
+
+    Returns:
+        JSON with found, pdf_url (verbatim from cache), article_url (/view/ID page),
+        title, reference, apa_authors, apa_year, apa_journal.
+    """
+    import json as _json
+    import re as _re
+    from src.tools.thaijo import _is_valid_thaijo_url, _normalize_to_view_url, _search_thaijo_impl
+
+    def _result(art: dict) -> str:
+        cached_url = art.get("pdf_url", pdf_url)
+        return _json.dumps({
+            "found":       True,
+            "pdf_url":     cached_url,                       # verbatim from cache
+            "article_url": art.get("article_url") or _normalize_to_view_url(cached_url),
+            "title":       art.get("title"),
+            "reference":   art.get("reference"),
+            "apa_authors": art.get("apa_authors"),
+            "apa_year":    art.get("apa_year"),
+            "apa_journal": art.get("apa_journal"),
+            "summary":     (art.get("summary") or "")[:300],
+        }, ensure_ascii=False)
+
+    def _cache_articles():
+        """Yield all articles from all live cache rows."""
+        try:
+            rows = query_db(
+                "SELECT results_json FROM thaijo_search_cache WHERE expires_at > NOW()",
+                [],
+            )
+            for row in rows:
+                for art in (row.get("results_json") or []):
+                    yield art
+        except Exception as e:
+            logger.warning("lookup_thaijo_evidence: DB error — %s", e)
+
+    if pdf_url and _is_valid_thaijo_url(pdf_url):
+        # Pass 1: exact match on pdf_url as given
+        for art in _cache_articles():
+            if art.get("pdf_url") == pdf_url:
+                logger.info("lookup_thaijo_evidence: exact hit url=%r", pdf_url[:80])
+                return _result(art)
+
+        # Pass 2: match by article ID (handles /view/ID vs /view/ID/FILEID and /download/)
+        m = _re.search(r'/article/(?:view|download)/(\d+)', pdf_url)
+        if m:
+            article_id = m.group(1)
+            best = None
+            for art in _cache_articles():
+                art_url = art.get("pdf_url", "")
+                if f'/article/view/{article_id}' in art_url or f'/article/download/{article_id}/' in art_url:
+                    # Prefer entry with more metadata
+                    if best is None or (art.get("title") and not best.get("title")):
+                        best = art
+            if best:
+                logger.info("lookup_thaijo_evidence: id-match %r → %r", pdf_url[:80], best.get("pdf_url","")[:80])
+                return _result(best)
+
+    # Pass 3: live search fallback
+    if search_term:
+        try:
+            raw = _search_thaijo_impl(search_term, size=10)
+            data = _json.loads(raw)
+            results = data.get("results", [])
+            if pdf_url:
+                for art in results:
+                    if art.get("pdf_url") == pdf_url:
+                        logger.info("lookup_thaijo_evidence: search exact hit url=%r", pdf_url[:80])
+                        return _result(art)
+            if results and not pdf_url:
+                logger.info("lookup_thaijo_evidence: search first-result term=%r", search_term[:60])
+                return _result(results[0])
+        except Exception as e:
+            logger.warning("lookup_thaijo_evidence: search failed — %s", e)
+
+    return _json.dumps({
+        "found": False,
+        "pdf_url": pdf_url,
+        "note": "Not in cache. Re-search with search_term to populate cache first.",
+    }, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Utility: verify ThaiJO URL against the search cache
+# ---------------------------------------------------------------------------
+
+def _verify_thaijo_url_in_cache(pdf_url: str) -> bool:
+    """Return True if pdf_url (or same article ID) exists in thaijo_search_cache (not expired).
+
+    Uses exact JSONB match first, then article-ID prefix fallback to handle
+    /view/ID vs /view/ID/FILEID mismatches. Fails open on DB error.
+    """
+    import re as _re
+    try:
+        # Exact match
+        rows = query_db(
+            "SELECT 1 FROM thaijo_search_cache "
+            "WHERE results_json @> %s::jsonb "
+            "AND expires_at > NOW() "
+            "LIMIT 1",
+            (json.dumps([{"pdf_url": pdf_url}]),),
+        )
+        if rows:
+            return True
+        # Prefix fallback by article ID
+        article_id_match = _re.search(r'/article/view/(\d+)', pdf_url)
+        if article_id_match:
+            article_id = article_id_match.group(1)
+            rows = query_db(
+                "SELECT 1 FROM thaijo_search_cache "
+                "WHERE results_json::text LIKE %s AND expires_at > NOW() LIMIT 1",
+                (f'%/article/view/{article_id}%',),
+            )
+            return bool(rows)
+        return False
+    except Exception as e:
+        logger.warning("ThaiJO cache URL verify failed (fail open): %s", e)
+        return True  # fail open — never clear a valid URL due to DB error
+
+
+def _confirm_thaijo_url(pdf_url: str, search_term: str = "") -> str:
+    """Verify a ThaiJO pdf_url against thaijo_search_cache.
+
+    Steps:
+      1. Pattern check via _is_valid_thaijo_url() — fast reject
+      2. JSONB cache lookup — confirmed if URL is in API-sourced cache
+      3. Cache MISS + search_term → re-search via _search_thaijo_impl() (Tab 1 path)
+      4. Still not found → return "" (clear hallucinated URL)
+
+    Fails open on DB error (returns pdf_url) to avoid false-clear.
+    """
+    from src.tools.thaijo import _is_valid_thaijo_url, _search_thaijo_impl
+    import json as _json
+
+    # Step 1: fast pattern check
+    if not _is_valid_thaijo_url(pdf_url):
+        logger.warning("_confirm_thaijo_url: invalid pattern, clearing: %r", pdf_url[:80])
+        return ""
+
+    # Step 2: check PostgreSQL cache (JSONB contains query)
+    try:
+        rows = query_db(
+            "SELECT 1 FROM thaijo_search_cache "
+            "WHERE results_json @> %s::jsonb AND expires_at > NOW() LIMIT 1",
+            (_json.dumps([{"pdf_url": pdf_url}]),),
+        )
+        if rows:
+            return pdf_url  # confirmed: URL exists in API-sourced cache
+
+        # Fallback: prefix match by article ID (handles /view/ID vs /view/ID/FILEID)
+        import re as _re
+        article_id_match = _re.search(r'/article/view/(\d+)', pdf_url)
+        if article_id_match:
+            article_id = article_id_match.group(1)
+            rows = query_db(
+                "SELECT results_json FROM thaijo_search_cache "
+                "WHERE results_json::text LIKE %s AND expires_at > NOW() LIMIT 1",
+                (f'%/article/view/{article_id}%',),
+            )
+            if rows:
+                articles = rows[0].get("results_json", [])
+                for art in (articles if isinstance(articles, list) else []):
+                    art_url = art.get("pdf_url", "")
+                    if f'/article/view/{article_id}' in art_url:
+                        logger.info(
+                            "_confirm_thaijo_url: prefix match: %r → %r",
+                            pdf_url[:80], art_url[:80],
+                        )
+                        return art_url  # return cache URL (may have file segment)
+    except Exception as e:
+        logger.warning("_confirm_thaijo_url: cache lookup failed (%s) — fail open", e)
+        return pdf_url  # DB error → fail open
+
+    # Step 3: cache MISS — re-search with same term via same API path as Tab 1
+    if search_term:
+        try:
+            raw = _search_thaijo_impl(search_term, size=10)
+            data = _json.loads(raw)
+            real_urls = {r.get("pdf_url", "") for r in data.get("results", [])}
+            if pdf_url in real_urls:
+                return pdf_url  # found in fresh API result → confirmed
+            logger.warning(
+                "_confirm_thaijo_url: URL not in re-search for term=%r: %r",
+                search_term[:60], pdf_url[:80],
+            )
+        except Exception as e:
+            logger.warning("_confirm_thaijo_url: re-search failed (%s) — fail open", e)
+            return pdf_url  # fail open on search error
+
+    return ""  # no search_term + not in cache → cannot confirm → clear
+
+
 # Utility: parse the Citation Agent's JSON output
 # ---------------------------------------------------------------------------
 
@@ -476,6 +737,9 @@ def parse_evidence_context(raw_output: str) -> EvidenceContext:
 
     # Parse evidence items
     for item in data.get("evidence_items", []):
+        if not item.get("evidence_id"):
+            logger.warning("Skipping evidence item missing evidence_id")
+            continue
         try:
             ctx.evidence_items.append(EvidenceItem(
                 evidence_id=item.get("evidence_id", ""),
@@ -574,6 +838,19 @@ def parse_evidence_context(raw_output: str) -> EvidenceContext:
                 db_bib = _fmt(ev_row)
                 if db_bib:
                     cit.bibliography_text = db_bib
+
+    # ── ThaiJO URL verification: clear hallucinated open_url against cache ──
+    # RC-3 fix: the guard above skips thaijo_article, so LLM-hallucinated URLs
+    # were never corrected. Now verify each ThaiJO citation URL against the cache.
+    for cit in ctx.citations:
+        ev = ev_map.get(cit.evidence_id)
+        if ev and ev.evidence_type == "thaijo_article" and cit.open_url:
+            if not _verify_thaijo_url_in_cache(cit.open_url):
+                logger.warning(
+                    "ThaiJO URL not found in cache (possible hallucination): %r → clearing",
+                    cit.open_url[:80],
+                )
+                cit.open_url = ""
 
     # Parse coverage
     cov = data.get("coverage", {})

@@ -1,5 +1,6 @@
 """Agent A4 — NCD Policy Analyst: Nutrition & Non-Communicable Diseases."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 NCD_ANALYST_PROMPT = """คุณคือ NCD Policy Analyst ผู้เชี่ยวชาญด้านโภชนาการและโรคไม่ติดต่อเรื้อรัง
 
@@ -139,4 +140,5 @@ def create_ncd_policy_analyst(llm: str) -> Agent:
         llm=llm,
         verbose=True,
         max_iter=6,
+        **agent_retry_kwargs(),
     )

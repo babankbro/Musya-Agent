@@ -1,5 +1,6 @@
 """Deep Analyst Agent: root cause analysis, cross-regional comparisons, and policy implications."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 
 def create_deep_analyst(llm) -> Agent:
@@ -23,6 +24,7 @@ def create_deep_analyst(llm) -> Agent:
         verbose=True,
         allow_delegation=False,
         max_iter=8,
+        **agent_retry_kwargs(),
     )
 
 

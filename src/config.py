@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     GEMINI_MODEL_PRO: str = "gemini-2.5-pro"
     REPORT_MAX_TOKENS: int = 8192
 
+    # Gemini retry (429 RESOURCE_EXHAUSTED)
+    GEMINI_RETRY_LIMIT: int = 3
+    GEMINI_RETRY_DELAY: int = 60
+
     # pgvector (PostgreSQL-native vector search — replaces ChromaDB)
     PGVECTOR_COLLECTION: str = "musya_documents"
     EMBEDDING_MODEL: str = "models/gemini-embedding-001"  # Google Gemini embedding API (768-dim)
@@ -41,6 +45,7 @@ class Settings(BaseSettings):
     THAIJO_DEFAULT_SIZE: int = 5
     THAIJO_MAX_SIZE: int = 10
     THAIJO_ENABLED: bool = True
+    THAIJO_CACHE_TTL_DAYS: int = 7
 
     # Redis (shared with ThaiJO microservice for PDF summary cache)
     REDIS_URL: str = "redis://localhost:6379/0"

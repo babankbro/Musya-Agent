@@ -3,6 +3,7 @@
 FR-TJR-002: ค้นหาบทความจาก ThaiJO หลาย query พร้อมกัน
 """
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 from src.tools.thaijo import search_thaijo
 
@@ -28,6 +29,7 @@ def create_thaijo_searcher(llm) -> Agent:
         verbose=True,
         allow_delegation=False,
         max_iter=25,
+        **agent_retry_kwargs(),
     )
 
 
@@ -65,8 +67,12 @@ THAIJO_SEARCHER_PROMPT = """
     "articles": [
         {{
             "pdf_url": "https://he01.tci-thaijo.org/...",
+            "title": "ชื่อบทความจริง (จาก tool) หรือ null",
             "summary": "สรุปบทความ...",
-            "reference": "APA citation text หรือ null",
+            "reference": "Vancouver citation text หรือ null",
+            "apa_authors": "ผู้แต่ง (จาก tool) หรือ null",
+            "apa_year": "2565 (จาก tool) หรือ null",
+            "apa_journal": "ชื่อวารสาร (จาก tool) หรือ null",
             "source_queries": ["คำค้นที่ 1"],
             "source_type": "thaijo_article",
             "trust_level": "medium"
@@ -80,10 +86,25 @@ THAIJO_SEARCHER_PROMPT = """
 }}
 ```
 
-⚠️ สำคัญ:
+⚠️ กฎเหล็ก — ห้ามละเมิดโดยเด็ดขาด:
+
+**pdf_url — COPY ONLY, ห้าม generate ห้าม reconstruct:**
+- ค่า pdf_url ในแต่ละ article ต้อง copy มาจาก field ชื่อ "pdf_url" ใน JSON ที่ search_thaijo tool ส่งคืนมาเท่านั้น
+- ห้ามนำ URL ใดๆ จาก summary text, reference text, หรือส่วนอื่นๆ มาใส่เป็น pdf_url
+- ห้าม reconstruct URL เอง ห้าม เดา ID ห้าม ต่อ URL จากชิ้นส่วน
+- ถ้า tool ไม่ให้ pdf_url หรือให้ค่าว่าง ให้ใส่ null — ห้ามสร้าง URL ขึ้นมาเอง
+- ถ้าพบ URL รูปแบบ /article/download/ID/FILEID ในค่า pdf_url ที่ tool ส่งมา ให้แปลงเป็น /article/view/ID
+  เช่น https://he01.tci-thaijo.org/index.php/jnat/article/download/252647/170884
+       → https://he01.tci-thaijo.org/index.php/jnat/article/view/252647
+
+**ฟิลด์อื่นๆ:**
+- ห้ามเปลี่ยนค่า title, apa_authors, apa_year, apa_journal — copy ตรงๆ จาก tool output เท่านั้น
+- ถ้า tool ให้ title=null ให้คง null ไว้ ห้ามแต่งชื่อขึ้นมาเอง
+
+**การค้นหา:**
 - ต้องเรียก search_thaijo สำหรับทุกๆ keyword query ที่ได้รับมา ห้ามข้ามเด็ดขาด
-- หากได้ผลลัพธ์น้อย ให้วนซ้ำ (repeat) query นั้นด้วยเงื่อนไขที่ยืดหยุ่นขึ้น (strict=False) หรือเรียกหลาย page เพื่อให้ได้จำนวนบทความที่เพียงพอ
-- ลบซ้ำด้วย pdf_url เท่านั้น
+- หากได้ผลลัพธ์น้อย ให้ลอง strict=False หรือเรียกหลาย page
+- ลบซ้ำด้วย pdf_url เท่านั้น — URL เดียวกัน = บทความเดียวกัน
 - ถ้าได้ error ให้ใส่ใน failed_queries และดำเนินต่อจนครบทุก query
-- ต้องรักษาข้อมูล source_queries ของแต่ละบทความอย่างถูกต้อง เพื่อให้ Report Summary แสดงความเชื่อมโยงได้อย่างครบถ้วน
+- ต้องรักษาข้อมูล source_queries ของแต่ละบทความอย่างถูกต้อง
 """

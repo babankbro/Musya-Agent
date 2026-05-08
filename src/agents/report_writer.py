@@ -1,5 +1,6 @@
 """Report Writer Agent: composes final Thai-language report from analysis."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 
 def create_report_writer(llm) -> Agent:
@@ -27,6 +28,7 @@ def create_report_writer(llm) -> Agent:
         verbose=True,
         allow_delegation=False,
         max_iter=10,
+        **agent_retry_kwargs(),
     )
 
 

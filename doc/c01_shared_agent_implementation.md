@@ -79,8 +79,11 @@ build_foundation_tasks(agents, user_message, province, year, notebook_id, topics
 | `citation_evidence.py` | ✅ Done | `parse_evidence_context()` ไม่มี unit tests (critical path) |
 | `shared_foundation.py` — `build_foundation_agents()` | ✅ Done | NLM injection เป็น post-init mutation — fragile |
 | `shared_foundation.py` — `build_foundation_tasks()` | ✅ Done | context chain ยังไม่มี integration test |
-| ThaiJO fallback | ⚠️ Partial | ไม่มี test กรณี `api.thaijo.org:8505` down |
-| Integration smoke test | ❌ Missing | ยังไม่มี test ยืนยัน agent wiring end-to-end |
+| ThaiJO fallback | ✅ Done | Cache-first: API down + cache HIT → return cached; API down + MISS → graceful empty |
+| ThaiJO URL validation | ✅ Done (p01) | `THAIJO_URL_PATTERN` กรอง URL ผิดแบบก่อน LLM; `_verify_thaijo_url_in_cache()` clear hallucinated URLs หลัง LLM |
+| ThaiJO cache | ✅ Done (p01) | `thaijo_search_cache` DB table + cache-first in `_search_thaijo_impl()`; TTL=7 วัน |
+| ThaiJO `_parse()` correction | ✅ Done (p01) | Priority: exact match → pattern check → fuzzy ≥ 0.6 → clear; ใช้ Searcher output (to[1]) |
+| Integration smoke test | ⚠️ Partial | ThaiJO pipeline tests ✅ (56 tests); agent wiring end-to-end ยังไม่มี |
 | Doc parity | ⚠️ Stale | Agent 2: doc ระบุ "10 tools" แต่ code มี 11; Citation Agent ขาด `list_all_documents_apa` |
 
 ---

@@ -4,6 +4,7 @@ Produces a concise 500–1,000 word answer in Thai with inline citations
 and a disclaimer about preliminary citation validation.
 """
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 QUICK_ANSWER_WRITER_PROMPT = """
 คุณคือ Quick Answer Writer สำหรับ Short Chat Pipeline
@@ -76,4 +77,5 @@ def create_quick_answer_writer(llm) -> Agent:
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        **agent_retry_kwargs(),
     )

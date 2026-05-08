@@ -1,5 +1,6 @@
 """Agent A2 — RTI Policy Analyst: Road Traffic Injury analysis."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 from src.tools.accident import (
     get_accident_hotspots,
@@ -136,4 +137,5 @@ def create_rti_policy_analyst(llm: str) -> Agent:
         llm=llm,
         verbose=True,
         max_iter=8,
+        **agent_retry_kwargs(),
     )

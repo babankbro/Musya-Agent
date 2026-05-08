@@ -4,6 +4,7 @@ import logging
 import re
 
 from crewai import Agent, Task, Crew, Process
+from src.agents.agent_defaults import agent_retry_kwargs
 
 from src.config import get_settings
 from src.tools.notebooklm import SUPPORTED_PROVINCES
@@ -41,6 +42,7 @@ def create_request_router(llm) -> Agent:
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        **agent_retry_kwargs(),
     )
 
 
@@ -169,7 +171,7 @@ def route_request(user_message: str, mode: str | None = None) -> dict:
     logger.info("🔀 [ROUTER] Routing request: %s", user_message[:100])
 
     try:
-        result = crew.kickoff()
+        result = kickoff_with_retry(crew)
         raw = str(result)
         return _parse_router_output(raw, user_message)
     except Exception as exc:

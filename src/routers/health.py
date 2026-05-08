@@ -4,6 +4,14 @@ from fastapi import APIRouter
 router = APIRouter(tags=["health"])
 
 
+@router.get("/api/debug/patch-status")
+async def patch_status():
+    """Check whether the 429 backoff monkey-patch is active."""
+    from crewai.agent.core import Agent as CrewAgent
+    patched = getattr(CrewAgent, "_429_patched", False)
+    return {"crewai_agent_429_patched": patched}
+
+
 @router.get("/api/health")
 async def health_check():
     """Check connectivity to PostgreSQL, MinIO, and ChromaDB."""

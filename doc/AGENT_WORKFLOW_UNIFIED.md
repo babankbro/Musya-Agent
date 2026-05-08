@@ -177,6 +177,21 @@ Pipeline → Retrieval Agent → search_thaijo → ThaiJO API (port 8505)
 - **Policy Brief Pipeline**: ✅ (include_thaijo=True, default)
 - **Short Chat Pipeline**: ✅ (search_thaijo optional ใน Quick Retrieval)
 
+#### ThaiJO URL Validation & Cache (p01 fix — 2026-04)
+
+เพื่อป้องกัน hallucinated `pdf_url` ใน Research Report pipeline:
+
+| Layer | Mechanism |
+|-------|-----------|
+| **Pre-LLM** | `THAIJO_URL_PATTERN` regex กรอง URL ผิดรูปแบบก่อน cache/return |
+| **Cache** | `thaijo_search_cache` (PostgreSQL) เก็บ API results พร้อม GIN index บน `results_json` |
+| **Cache-first** | `_search_thaijo_impl()` เช็ค cache HIT ก่อน call API — MISS แล้วค่อย UPSERT |
+| **Post-LLM (Citation Agent)** | `_verify_thaijo_url_in_cache()` ตรวจ `open_url` ทุกตัวที่เป็น `thaijo_article` — clear ถ้าไม่พบใน cache |
+| **Post-LLM (Orchestrator)** | `_parse()` ใช้ priority-based correction: exact match → pattern check → fuzzy ≥ 0.6 → clear |
+| **Logging** | Citation guard log: `Citation guard: N ThaiJO citation(s) had URLs cleared` |
+
+Config: `THAIJO_CACHE_TTL_DAYS=7` (`.env` หรือ `src/config.py`)
+
 ### Agent 1 — Request Interpreter
 
 | Property | Value |
@@ -203,7 +218,7 @@ Pipeline → Retrieval Agent → search_thaijo → ThaiJO API (port 8505)
 |----------|-------|
 | **Role** | SQL Specialist |
 | **Goal** | เขียน SQL query เพื่อดึงข้อมูลสำหรับกราฟหรือการวิเคราะห์พิเศษ |
-| **Tools** | `execute_custom_sql`, `explain_schema` |
+| **Tools** | `execute_custom_sql`, `explain_schema`, `get_table_row_count` |
 | **File** | `src/agents/sql_specialist.py` |
 
 ### Agent 4 — Citation & Evidence Agent

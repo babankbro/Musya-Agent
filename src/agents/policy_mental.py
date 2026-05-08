@@ -1,5 +1,6 @@
 """Agent A3 — Mental Health Policy Analyst with mandatory safety guardrails."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 MENTAL_ANALYST_PROMPT = """คุณคือ Mental Health Policy Analyst ผู้เชี่ยวชาญด้านนโยบายสุขภาพจิต
 
@@ -141,4 +142,5 @@ def create_mental_health_analyst(llm: str) -> Agent:
         llm=llm,
         verbose=True,
         max_iter=6,
+        **agent_retry_kwargs(),
     )

@@ -1,5 +1,6 @@
 """Request Interpreter Agent: parses user query into structured parameters."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 
 def create_request_interpreter(llm) -> Agent:
@@ -15,6 +16,7 @@ def create_request_interpreter(llm) -> Agent:
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        **agent_retry_kwargs(),
     )
 
 

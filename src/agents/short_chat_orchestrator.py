@@ -12,6 +12,7 @@ from src.config import get_settings
 from src.agents.shared_foundation import build_foundation_agents, build_foundation_tasks
 from src.agents.quick_answer_writer import create_quick_answer_writer, QUICK_ANSWER_WRITER_PROMPT
 from src.agents.progress import emit_progress
+from src.agents.agent_defaults import kickoff_with_retry
 from src.schemas.short_chat import ShortChatResponse, ShortChatCitation
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def run_short_chat(
     )
 
     logger.info("💬 [SHORT_CHAT] Starting pipeline: %s", user_message[:80])
-    result = crew.kickoff()
+    result = kickoff_with_retry(crew)
     elapsed = time.time() - start_time
 
     # Parse result into ShortChatResponse
@@ -118,7 +119,7 @@ def run_short_chat_with_progress(
     )
 
     logger.info("💬 [SHORT_CHAT] Starting pipeline (with progress): %s", user_message[:80])
-    result = crew.kickoff()
+    result = kickoff_with_retry(crew)
     elapsed = time.time() - start_time
 
     # Emit done events

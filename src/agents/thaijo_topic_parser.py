@@ -3,6 +3,7 @@
 FR-TJR-001: วิเคราะห์หัวข้อวิจัยและสร้าง search queries
 """
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 
 def create_thaijo_topic_parser(llm) -> Agent:
@@ -25,6 +26,7 @@ def create_thaijo_topic_parser(llm) -> Agent:
         verbose=True,
         allow_delegation=False,
         max_iter=5,
+        **agent_retry_kwargs(),
     )
 
 

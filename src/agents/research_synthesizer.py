@@ -1,5 +1,6 @@
 """Research Synthesizer Agent: expands raw data + analysis into narrative prose blocks."""
 from crewai import Agent
+from src.agents.agent_defaults import agent_retry_kwargs
 
 
 def create_research_synthesizer(llm) -> Agent:
@@ -22,6 +23,7 @@ def create_research_synthesizer(llm) -> Agent:
         verbose=True,
         allow_delegation=False,
         max_iter=8,
+        **agent_retry_kwargs(),
     )
 
 
