@@ -630,11 +630,19 @@ uploads/
 | `POST` | `/api/policy-brief/stream` | Policy Brief SSE streaming |
 | `POST` | `/api/accident-policy/zone10` | Accident Policy pipeline (5 จังหวัด Zone 10) |
 | `GET`  | `/api/accident-policy/zone10/data` | ดึงข้อมูล 7 policy queries (raw SQL) |
-| `GET` | `/test` | Standalone test UI (HTML) |
-| `GET` | `/documents` | Document & Citation Manager UI |
-| `GET` | `/docs` | FastAPI Swagger auto-docs |
+| `POST` | `/api/accident-chat/ask` | Accident Chat Pipeline |
+| `POST` | `/api/accident-chat/ask/stream` | Accident Chat SSE streaming |
+| `POST` | `/api/accident-chat/quick` | Raw SQL data for accident chat tools |
 
-### 7.1B ThaiJO APIs (✅ Implemented)
+### 7.1B Database Explorer APIs (✅ Implemented)
+
+| Method | Path | คำอธิบาย |
+|--------|------|---------|
+| `GET`  | `/api/db/tables` | List all tables |
+| `GET`  | `/api/db/tables/{table}/columns` | List columns for a table |
+| `GET`  | `/api/db/tables/{table}/rows` | Paginated rows |
+
+### 7.1C ThaiJO APIs (✅ Implemented)
 
 | Method | Path | คำอธิบาย |
 |--------|------|---------|

@@ -8,7 +8,6 @@ Covers all 4 policy question groups (20 questions + free-form):
 
 DATA LIMITATIONS (communicated in all relevant tool outputs):
   - fact_accident_person: EMPTY — no helmet/seatbelt/age/sex person-level data
-  - light_condition, road_condition: NULL in all rows (not in CSV source)
   - road_name: mostly NULL/empty in mart_province_road (CSV field blank)
   - Years in DB: CE (2021-2026); user questions use พ.ศ. → convert CE+543
 """
@@ -27,11 +26,6 @@ _PERSON_EMPTY_NOTE = (
     "⚠️ ข้อจำกัดข้อมูล: ตาราง fact_accident_person ไม่มีข้อมูล "
     "(CSV แหล่งนี้ไม่มีข้อมูลระดับบุคคล เช่น การสวมหมวก การคาดเข็มขัด อายุ เพศ) "
     "ไม่สามารถตอบคำถามนี้ได้จากฐานข้อมูลปัจจุบัน"
-)
-
-_LIGHT_ROAD_NULL_NOTE = (
-    "⚠️ ข้อจำกัดข้อมูล: คอลัมน์ light_condition และ road_condition เป็น NULL ทั้งหมด "
-    "(ไม่มีใน CSV แหล่งข้อมูล) — ใช้ weather_condition และ accident_type แทนในการวิเคราะห์"
 )
 
 _YEAR_NOTE = "หมายเหตุ: ปีในฐานข้อมูลเป็น ค.ศ. — พ.ศ. = ค.ศ. + 543"
@@ -330,39 +324,53 @@ def query_district_road_comparison(province: str = "",
 def _query_fatal_timeband(province: str,
                           year_start: int = 2021,
                           year_end: int = 2026) -> str:
-    """Q3: จุดเสี่ยงที่มีผู้เสียชีวิต มักเกิดช่วงเวลาใด"""
+    """Q3: ช่วงเวลาที่มีผู้เสียชีวิตสูงสุด — นับอุบัติเหตุทั้งหมดต่อชั่วโมง"""
     clause, params = _province_ilike_clause("g", province)
     sql = f"""
         SELECT
-            EXTRACT(HOUR FROM e.event_datetime)::int AS hour_of_day,
-            COUNT(*)                AS total_accidents,
-            SUM(e.death_count)      AS total_deaths,
-            SUM(e.serious_injured)  AS total_serious
+            EXTRACT(HOUR FROM e.event_datetime)::int   AS hour_of_day,
+            COUNT(*)                                    AS all_accidents,
+            COUNT(*) FILTER (WHERE e.death_count > 0)  AS fatal_accidents,
+            COALESCE(SUM(e.death_count), 0)             AS total_deaths,
+            COALESCE(SUM(e.serious_injured), 0)         AS total_serious
         FROM fact_accident_event e
         JOIN dim_geography g ON e.geography_id = g.geography_id
         WHERE {clause}
           AND e.event_datetime IS NOT NULL
-          AND e.death_count > 0
           AND (e.csv_year BETWEEN %s AND %s OR e.csv_year IS NULL)
         GROUP BY hour_of_day
-        ORDER BY total_deaths DESC
+        ORDER BY total_deaths DESC, fatal_accidents DESC
         LIMIT 24
+    """
+    # Also get count of rows excluded due to NULL event_datetime
+    sql_null = f"""
+        SELECT COUNT(*) AS null_dt_count,
+               COALESCE(SUM(e.death_count), 0) AS null_dt_deaths
+        FROM fact_accident_event e
+        JOIN dim_geography g ON e.geography_id = g.geography_id
+        WHERE {clause}
+          AND e.event_datetime IS NULL
+          AND (e.csv_year BETWEEN %s AND %s OR e.csv_year IS NULL)
     """
     try:
         rows = query_db(sql, tuple(params + [year_start, year_end]))
+        null_rows = query_db(sql_null, tuple(params + [year_start, year_end]))
     except Exception as exc:
         return f"ไม่สามารถดึงข้อมูลช่วงเวลาได้: {exc}"
 
     if not rows:
         return f"ไม่พบข้อมูลช่วงเวลาเสียชีวิตสำหรับ '{province}'"
 
+    null_dt_count  = null_rows[0]["null_dt_count"]  if null_rows else 0
+    null_dt_deaths = null_rows[0]["null_dt_deaths"] if null_rows else 0
+
     prov_label = province.strip() or "เขตสุขภาพที่ 10"
     year_label = f"พ.ศ. {_ce_to_be(year_start)}-{_ce_to_be(year_end)}"
     top5 = {r["hour_of_day"] for r in rows[:5]}
     lines = [
-        f"[Fatal Timeband] ช่วงเวลาที่มีผู้เสียชีวิตสูงสุด — {prov_label} ({year_label})",
-        f"  {'ชั่วโมง':>7} {'เสียชีวิต':>10} {'อุบัติเหตุรวม':>13} {'สาหัส':>7}  ความเสี่ยง",
-        "  " + "-" * 55,
+        f"[Fatal Timeband] ช่วงเวลาที่มีผู้เสียชีวิต — {prov_label} ({year_label})",
+        f"  {'ชั่วโมง':>7} {'เสียชีวิต':>10} {'อุบัติ(มีตาย)':>13} {'อุบัติ(ทั้งหมด)':>15} {'สาหัส':>7}  ความเสี่ยง",
+        "  " + "-" * 70,
     ]
     for r in sorted(rows, key=lambda x: x["hour_of_day"] or 0):
         h = r["hour_of_day"] or 0
@@ -370,11 +378,22 @@ def _query_fatal_timeband(province: str,
         lines.append(
             f"  {h:02d}:00   "
             f"{r['total_deaths'] or 0:>10,} "
-            f"{r['total_accidents'] or 0:>13,} "
+            f"{r['fatal_accidents'] or 0:>13,} "
+            f"{r['all_accidents'] or 0:>15,} "
             f"{r['total_serious'] or 0:>7,}"
             f"{flag}"
         )
     lines.append(f"\n  ช่วงเสี่ยงสูงสุด 5 อันดับ: {', '.join(f'{h:02d}:00' for h in sorted(top5))}")
+    total_deaths_timed = sum(r["total_deaths"] or 0 for r in rows)
+    total_acc_timed    = sum(r["all_accidents"] or 0 for r in rows)
+    lines.append(f"  รวมในตาราง: อุบัติเหตุ {total_acc_timed:,} ครั้ง | ผู้เสียชีวิต {total_deaths_timed:,} ราย")
+    if null_dt_count > 0:
+        lines.append(
+            f"  ⚠️ ไม่รวม {null_dt_count:,} รายการที่ไม่มีข้อมูลเวลา (deaths ในกลุ่มนี้: {null_dt_deaths:,} ราย)"
+        )
+    lines.append(
+        "  หมายเหตุ: อุบัติ(มีตาย) = เฉพาะครั้งที่มีผู้เสียชีวิต | อุบัติ(ทั้งหมด) = อุบัติเหตุทุกครั้งในชั่วโมงนั้น"
+    )
     return "\n".join(lines)
 
 
@@ -397,7 +416,7 @@ def query_fatal_timeband(province: str = "",
 def _query_weather_accident_stats(province: str,
                                    year_start: int = 2021,
                                    year_end: int = 2026) -> str:
-    """Q4/Q5: weather_condition + accident_type fallback (light/road_condition = NULL)"""
+    """Q4/Q5: weather_condition + accident_type + accident_location analysis"""
     clause, params = _province_ilike_clause("g", province)
     sql = f"""
         SELECT
@@ -417,17 +436,15 @@ def _query_weather_accident_stats(province: str,
     try:
         rows = query_db(sql, tuple(params + [year_start, year_end]))
     except Exception as exc:
-        return f"{_LIGHT_ROAD_NULL_NOTE}\nไม่สามารถดึงข้อมูลได้: {exc}"
+        return f"ไม่สามารถดึงข้อมูลได้: {exc}"
 
     if not rows:
-        return f"{_LIGHT_ROAD_NULL_NOTE}\nไม่พบข้อมูลสำหรับ '{province}'"
+        return f"ไม่พบข้อมูลสำหรับ '{province}'"
 
     prov_label = province.strip() or "เขตสุขภาพที่ 10"
     year_label = f"พ.ศ. {_ce_to_be(year_start)}-{_ce_to_be(year_end)}"
     lines = [
         f"[Weather/Accident Type Analysis] — {prov_label} ({year_label})",
-        _LIGHT_ROAD_NULL_NOTE,
-        "(ใช้ weather_condition + accident_type แทน light_condition/road_condition ที่ไม่มีข้อมูล)",
         f"  {'สภาพอากาศ':<25} {'ลักษณะการเกิดเหตุ':<25} {'อุบัติเหตุ':>10} {'เสียชีวิต':>10} {'สาหัส':>7}",
         "  " + "-" * 85,
     ]
@@ -448,9 +465,7 @@ def query_weather_accident_stats(province: str = "",
                                   year_end: int = 2026) -> str:
     """Group 1 Q4/Q5: สภาพอากาศและลักษณะการเกิดเหตุที่ทำให้เกิดผู้เสียชีวิต/บาดเจ็บสาหัสมากที่สุด.
 
-    หมายเหตุ: light_condition และ road_condition เป็น NULL ทั้งหมดในฐานข้อมูล
-    ใช้ weather_condition + accident_type เป็น proxy แทน
-    ข้อมูลจาก: fact_accident_event + dim_geography
+    วิเคราะห์ weather_condition + accident_type จาก: fact_accident_event + dim_geography
 
     Args:
         province: ชื่อจังหวัด (ภาษาไทย) หรือ '' สำหรับเขต 10
@@ -1250,8 +1265,6 @@ def get_accident_schema(table_name: str = "") -> str:
             ],
             "data_limitations": {
                 "fact_accident_person": "EMPTY — no person-level data",
-                "light_condition": "NULL in all rows — not in CSV",
-                "road_condition": "NULL in all rows — not in CSV",
                 "road_name": "Mostly NULL/empty in mart_province_road",
                 "year_format": "CE (Christian Era) — add 543 for พ.ศ.",
             }

@@ -69,23 +69,65 @@ def _int(row, key):
     return int(v) if v is not None else None
 
 
+_EXCEL_EPOCH = datetime(1899, 12, 30)
+
+
 def _parse_date(row):
-    """Parse วันที่เกิดเหตุ (d/m/yyyy or d/m/yy) + เวลา (H:MM) → datetime."""
+    """Parse วันที่เกิดเหตุ + เวลา → datetime.
+
+    Handles two source formats:
+      A) Slash date  d/m/YYYY or d/m/YY  + time H:MM         (years 2021-2023)
+      B) Excel serial (int or float)     + fractional day     (years 2024-2026)
+         e.g. date='45292' time='0.020833333'  → 2024-01-01 00:30
+    """
+    from datetime import timedelta
     date_str = _f(row, "วันที่เกิดเหตุ", "")
     time_str = _f(row, "เวลา", "0:00")
     if not date_str:
         return None
     try:
-        for fmt in ("%d/%m/%Y", "%d/%m/%y"):
+        # ── Format A: slash date ────────────────────────────────────────────
+        if "/" in date_str:
+            for fmt in ("%d/%m/%Y", "%d/%m/%y", "%m/%d/%Y", "%m/%d/%y"):
+                try:
+                    d = datetime.strptime(date_str, fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return None
+            # time is H:MM
             try:
-                d = datetime.strptime(date_str, fmt)
-                break
-            except ValueError:
-                continue
-        else:
+                h, m = (time_str + ":00").split(":")[:2]
+                return d.replace(hour=int(h) % 24, minute=int(m) % 60)
+            except Exception:
+                return d
+
+        # ── Format B: Excel serial date + fractional day time ───────────────
+        serial_str = date_str.split(".")[0]   # strip ".0" if float string
+        if not serial_str.lstrip("-").isdigit():
             return None
-        h, m = (time_str + ":00").split(":")[:2]
-        return d.replace(hour=int(h) % 24, minute=int(m) % 60)
+        serial = int(serial_str)
+        if serial < 1:
+            return None
+        base_date = _EXCEL_EPOCH + timedelta(days=serial)
+
+        # time may be fractional day ("0.020833333") or H:MM ("14:30")
+        try:
+            frac = float(time_str)
+            # fractional day → seconds
+            total_seconds = round(frac * 86400)
+            hours, rem = divmod(total_seconds, 3600)
+            minutes = rem // 60
+            return base_date.replace(hour=hours % 24, minute=minutes % 60)
+        except ValueError:
+            # fallback: H:MM string
+            try:
+                h, m = (time_str + ":00").split(":")[:2]
+                return base_date.replace(hour=int(h) % 24, minute=int(m) % 60)
+            except Exception:
+                return base_date
+
     except Exception:
         return None
 
@@ -266,13 +308,21 @@ GROUP BY g.province_name, e.csv_year;
 MART_PROVINCE_ROAD = """
 TRUNCATE mart_province_road;
 INSERT INTO mart_province_road
-    (province_name, road_name, road_code, year_no,
+    (province_name, district_name, road_name, road_code, road_type_label, year_no,
      accident_count, injured_count, serious_injured, death_count,
      hotspot_score, dominant_cause, dominant_vehicle)
 SELECT
     g.province_name,
+    g.district_name,
     r.road_name,
     r.road_code,
+    CASE
+        WHEN r.road_type IN ('กรมทางหลวง','การทางพิเศษแห่งประเทศไทย') THEN 'สายหลัก'
+        WHEN r.road_type = 'กรมทางหลวงชนบท' THEN 'สายรอง'
+        WHEN r.road_code ~ '^[0-9]+$' THEN 'สายหลัก'
+        WHEN r.road_code IS NOT NULL AND r.road_code !~ '^[0-9]+$' THEN 'สายรอง'
+        ELSE 'ไม่ระบุ'
+    END                               AS road_type_label,
     e.csv_year                        AS year_no,
     COUNT(*)                          AS accident_count,
     COALESCE(SUM(e.injured_count),0)  AS injured_count,
@@ -286,7 +336,7 @@ FROM fact_accident_event e
 JOIN dim_geography g USING (geography_id)
 JOIN dim_road_segment r USING (road_segment_id)
 WHERE e.csv_year IS NOT NULL
-GROUP BY g.province_name, r.road_name, r.road_code, e.csv_year;
+GROUP BY g.province_name, g.district_name, r.road_name, r.road_code, r.road_type, e.csv_year;
 """
 
 
@@ -390,10 +440,12 @@ def run():
             serious_inj    = _int(row, "ผู้บาดเจ็บสาหัส") or 0
             minor_inj      = _int(row, "ผู้บาดเจ็บเล็กน้อย") or 0
             total_inj      = _int(row, "รวมจำนวนผู้บาดเจ็บ") or (serious_inj + minor_inj)
-            weather        = _f(row, "สภาพอากาศ", "")
-            accident_type  = _f(row, "ลักษณะการเกิดเหตุ", "")
-            cause          = _f(row, "มูลเหตุสันนิษฐาน", "")
-            vehicle_type   = _f(row, "รถคันที่1", "")
+            weather           = _f(row, "สภาพอากาศ", "")
+            accident_type     = _f(row, "ลักษณะการเกิดเหตุ", "")
+            cause             = _f(row, "มูลเหตุสันนิษฐาน", "")
+            vehicle_type      = _f(row, "รถคันที่1", "")
+            accident_location = _f(row, "บริเวณที่เกิดเหตุ", "") or None
+            cause_presumed    = cause or None
 
             # Severity derived from counts
             if death_count > 0:
@@ -407,10 +459,10 @@ def run():
 
             batch.append((
                 event_dt, geography_id, road_segment_id,
-                weather, None, None,            # weather, road_cond, light_cond
-                cause, severity, vehicle_type,
+                weather, cause, severity, vehicle_type,
                 total_inj, death_count, source_id,
                 serious_inj, csv_year, lat, lon,
+                accident_location, cause_presumed,
             ))
 
             if len(batch) >= BATCH:
@@ -419,10 +471,11 @@ def run():
                     """
                     INSERT INTO fact_accident_event
                         (event_datetime, geography_id, road_segment_id,
-                         weather_condition, road_condition, light_condition,
+                         weather_condition,
                          accident_type, severity_level, vehicle_type,
                          injured_count, death_count, source_id,
-                         serious_injured, csv_year, latitude, longitude)
+                         serious_injured, csv_year, latitude, longitude,
+                         accident_location, cause_presumed)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT DO NOTHING
                     """,
@@ -441,10 +494,11 @@ def run():
                 """
                 INSERT INTO fact_accident_event
                     (event_datetime, geography_id, road_segment_id,
-                     weather_condition, road_condition, light_condition,
+                     weather_condition,
                      accident_type, severity_level, vehicle_type,
                      injured_count, death_count, source_id,
-                     serious_injured, csv_year, latitude, longitude)
+                     serious_injured, csv_year, latitude, longitude,
+                     accident_location, cause_presumed)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT DO NOTHING
                 """,

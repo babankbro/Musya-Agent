@@ -54,6 +54,16 @@ Router(mode=accident_policy) → Zone10 SQL Fetcher → Zone10 Policy Analyst �
 | Zone10 Policy Analyst | `accident_policy_agent.py` | pro | ✅ พร้อม |
 | Zone10 Report Writer | `accident_policy_agent.py` | pro | ✅ พร้อม |
 
+### Accident Chat Pipeline (Zone 10) — 2 agents (New v7.3)
+```
+Router(mode=accident_chat) → Accident SQL Data Specialist → RTI Policy Answer Writer
+```
+
+| Agent | File | LLM Tier | สถานะ |
+|-------|------|----------|-------|
+| Accident SQL Data Specialist | `accident_chat_orchestrator.py` | fast | ✅ พร้อม |
+| RTI Policy Answer Writer | `accident_chat_orchestrator.py` | pro | ✅ พร้อม |
+
 ---
 
 ## 2. ThaiJO Academic Subsystem
@@ -103,6 +113,11 @@ Router(mode=accident_policy) → Zone10 SQL Fetcher → Zone10 Policy Analyst �
 | `POST` | `/api/policy-brief` | policy-brief | Direct policy brief pipeline |
 | `POST` | `/api/accident-policy/zone10` | accident-policy | รัน Accident Policy Pipeline สำหรับเขตสุขภาพ 10 (LLM) |
 | `GET` | `/api/accident-policy/zone10/data` | accident-policy | ดึงข้อมูล 7 policy queries สำหรับเขตสุขภาพ 10 (raw SQL) |
+| `POST` | `/api/accident-chat/ask` | accident-chat | รัน Accident Chat Pipeline (2 agents) |
+| `POST` | `/api/accident-chat/ask/stream` | accident-chat | รัน Accident Chat Pipeline (SSE) |
+| `POST` | `/api/accident-chat/quick` | accident-chat | ดึงข้อมูลดิบจากเครื่องมือ |
+| `GET` | `/api/db/tables` | db-explorer | ดูตารางทั้งหมด |
+| `GET` | `/api/db/tables/{table}/rows` | db-explorer | ดูข้อมูลในตาราง |
 
 ---
 

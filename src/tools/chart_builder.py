@@ -207,17 +207,17 @@ def build_time_distribution_chart() -> str:
 
 @tool("build_road_condition_pie_chart")
 def build_road_condition_pie_chart() -> str:
-    """Build a pie chart of accident share by road condition.
+    """Build a pie chart of accident share by accident location type (บริเวณที่เกิดเหตุ).
 
     Returns:
         JSON string matching ChartSpec for a pie chart:
-        slices = road condition categories, values = accident counts.
+        slices = accident location categories, values = accident counts.
     """
     sql = """
-        SELECT road_condition, COUNT(*) AS accident_count
+        SELECT accident_location, COUNT(*) AS accident_count
         FROM fact_accident_event
-        WHERE road_condition IS NOT NULL AND road_condition <> ''
-        GROUP BY road_condition
+        WHERE accident_location IS NOT NULL AND accident_location <> ''
+        GROUP BY accident_location
         ORDER BY accident_count DESC
         LIMIT 8
     """
@@ -227,9 +227,9 @@ def build_road_condition_pie_chart() -> str:
         return json.dumps({"error": str(exc)})
 
     if not rows:
-        return json.dumps({"error": "ไม่พบข้อมูลสภาพถนน"})
+        return json.dumps({"error": "ไม่พบข้อมูลบริเวณที่เกิดเหตุ"})
 
-    labels = [r["road_condition"] for r in rows]
+    labels = [r["accident_location"] for r in rows]
     data = [int(r["accident_count"]) for r in rows]
 
     datasets = [
@@ -242,7 +242,7 @@ def build_road_condition_pie_chart() -> str:
 
     return _chart_json(
         chart_type="pie",
-        title="สัดส่วนอุบัติเหตุตามสภาพถนน",
+        title="สัดส่วนอุบัติเหตุตามบริเวณที่เกิดเหตุ",
         labels=labels,
         datasets=datasets,
         source_note="fact_accident_event",

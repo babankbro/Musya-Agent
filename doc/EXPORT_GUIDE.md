@@ -52,20 +52,24 @@ tar -czf musya_agent_export.tar.gz `
 The PostgreSQL container is `chatv1_postgres` using the `pgvector/pgvector:pg16` image.
 Data lives in the named volume `chatv1_pgdata`.
 
-### Full schema + data dump
+Backup files are stored in: `Agent\doc\backups\`
+
+> Current backup: `doc\backups\musya_20260517_1518.dump` (19.38 MB)
+
+### Full schema + data dump (timestamped)
 
 ```powershell
-# Dump everything to a single file
+# Run from D:\work\musya\Agent
+$stamp = Get-Date -Format "yyyyMMdd_HHmm"
 docker exec chatv1_postgres pg_dump `
   -U postgres `
   -d "chat-aio" `
-  --no-owner `
-  --no-acl `
+  --no-owner --no-acl `
   -F c `
-  -f /tmp/musya_full.dump
+  -f "/tmp/musya_$stamp.dump"
 
-# Copy the dump out of the container
-docker cp chatv1_postgres:/tmp/musya_full.dump ./musya_full.dump
+docker cp "chatv1_postgres:/tmp/musya_$stamp.dump" "doc\backups\musya_$stamp.dump"
+Write-Host "Saved: doc\backups\musya_$stamp.dump"
 ```
 
 The `-F c` flag uses PostgreSQL's custom binary format — smaller and faster to restore than plain SQL.
@@ -73,11 +77,11 @@ The `-F c` flag uses PostgreSQL's custom binary format — smaller and faster to
 ### Dump only accident/policy tables (smaller file)
 
 ```powershell
+$stamp = Get-Date -Format "yyyyMMdd_HHmm"
 docker exec chatv1_postgres pg_dump `
   -U postgres `
   -d "chat-aio" `
-  --no-owner `
-  --no-acl `
+  --no-owner --no-acl `
   -F c `
   -t fact_accident_event `
   -t fact_accident_person `
@@ -85,9 +89,9 @@ docker exec chatv1_postgres pg_dump `
   -t mart_province_road `
   -t mart_province_year `
   -t mart_accident_summary `
-  -f /tmp/musya_accident.dump
+  -f "/tmp/musya_accident_$stamp.dump"
 
-docker cp chatv1_postgres:/tmp/musya_accident.dump ./musya_accident.dump
+docker cp "chatv1_postgres:/tmp/musya_accident_$stamp.dump" "doc\backups\musya_accident_$stamp.dump"
 ```
 
 ### Dump schema only (no data — for fresh migrations)
@@ -98,7 +102,7 @@ docker exec chatv1_postgres pg_dump `
   -d "chat-aio" `
   --no-owner --no-acl `
   -s `
-  > ./musya_schema_only.sql
+  > "doc\backups\musya_schema_only.sql"
 ```
 
 ---
@@ -162,18 +166,22 @@ Expected: both services show `healthy`.
 
 #### Option A — Restore full dump (recommended)
 
+Use the latest `.dump` file from `doc\backups\`:
+
 ```powershell
-# Copy the dump into the container
-docker cp musya_full.dump chatv1_postgres:/tmp/musya_full.dump
+# Pick the dump file to restore (use the latest timestamp)
+$dump = "doc\backups\musya_20260517_1518.dump"
+
+# Copy into the container
+docker cp $dump chatv1_postgres:/tmp/restore.dump
 
 # Restore
 docker exec chatv1_postgres pg_restore `
   -U postgres `
   -d "chat-aio" `
-  --no-owner `
-  --no-acl `
+  --no-owner --no-acl `
   -F c `
-  /tmp/musya_full.dump
+  /tmp/restore.dump
 ```
 
 #### Option B — Run migrations from scratch (no dump)
@@ -298,23 +306,32 @@ Invoke-RestMethod "http://localhost:8000/api/accident-policy/zone10/data?provinc
 
 ## 7. Database Backup Schedule (ongoing)
 
-To keep backups while the container is running, create a simple script:
+Backups live in `Agent\doc\backups\`. The folder is already created.
+
+### One-shot backup (run anytime)
 
 ```powershell
-# backup_db.ps1
+# Run from D:\work\musya\Agent
 $stamp = Get-Date -Format "yyyyMMdd_HHmm"
 docker exec chatv1_postgres pg_dump `
   -U postgres -d "chat-aio" --no-owner --no-acl -F c `
   -f "/tmp/musya_$stamp.dump"
-docker cp "chatv1_postgres:/tmp/musya_$stamp.dump" ".\backups\musya_$stamp.dump"
-Write-Host "Backup saved: backups\musya_$stamp.dump"
+docker cp "chatv1_postgres:/tmp/musya_$stamp.dump" "doc\backups\musya_$stamp.dump"
+Write-Host "Saved: doc\backups\musya_$stamp.dump"
 ```
 
-Run it:
+### List existing backups
 
 ```powershell
-New-Item -ItemType Directory -Force backups
-.\backup_db.ps1
+Get-ChildItem "doc\backups\*.dump" | Select-Object Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}} | Sort-Object Name
 ```
 
-To restore any backup later, use the same `pg_restore` command from Step 4.
+### Restore a specific backup
+
+```powershell
+$dump = "doc\backups\musya_20260517_1518.dump"   # ← change to target file
+docker cp $dump chatv1_postgres:/tmp/restore.dump
+docker exec chatv1_postgres pg_restore `
+  -U postgres -d "chat-aio" --no-owner --no-acl -F c `
+  /tmp/restore.dump
+```

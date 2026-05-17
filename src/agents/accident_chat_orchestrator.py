@@ -53,7 +53,6 @@ SQL_AGENT_PROMPT = """คุณคือ Accident Data Specialist ผู้เ�
 
 **ข้อจำกัดข้อมูล (ต้องระบุในผลลัพธ์เสมอหากเกี่ยวข้อง):**
 - fact_accident_person: ว่างทั้งหมด — ไม่มีข้อมูล helmet/seatbelt/อายุ/เพศ
-- light_condition, road_condition: NULL ทั้งหมด — ไม่มีใน CSV
 - road_name: ส่วนใหญ่ไม่ระบุ
 - ปีในฐานข้อมูล = ค.ศ. (CE); พ.ศ. = CE + 543
 """
@@ -105,7 +104,7 @@ def _create_sql_agent(llm) -> Agent:
         goal="ดึงข้อมูลอุบัติเหตุที่ถูกต้องและครบถ้วนจากฐานข้อมูลโดยใช้เครื่องมือที่เหมาะสม",
         backstory=(
             "ผู้เชี่ยวชาญด้านฐานข้อมูลอุบัติเหตุทางถนน รู้จักตาราง mart/fact/dim ทั้งหมด "
-            "และข้อจำกัดของข้อมูล เช่น fact_accident_person ว่าง, light/road_condition เป็น NULL "
+            "และข้อจำกัดของข้อมูล เช่น fact_accident_person ว่าง "
             "ระบุข้อจำกัดข้อมูลอย่างตรงไปตรงมาในผลลัพธ์"
         ),
         tools=ACCIDENT_CHAT_TOOLS,
@@ -198,8 +197,6 @@ def _extract_limitations(raw_data: str) -> list[str]:
     limits = []
     if "fact_accident_person" in raw_data:
         limits.append("ไม่มีข้อมูลระดับบุคคล (helmet/seatbelt/อายุ/เพศ) — fact_accident_person ว่าง")
-    if "light_condition" in raw_data or "road_condition" in raw_data:
-        limits.append("light_condition และ road_condition เป็น NULL ทั้งหมด")
     if "ไม่ระบุ (unknown)" in raw_data or "ไม่ระบุ" in raw_data:
         limits.append("ชื่อถนนส่วนใหญ่ไม่ระบุในข้อมูล CSV — แนะนำวิเคราะห์ตามพิกัด GPS")
     return limits

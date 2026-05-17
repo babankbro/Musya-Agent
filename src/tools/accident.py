@@ -386,7 +386,7 @@ def get_accident_time_distribution(start_date: str = "", end_date: str = "", geo
 
 @tool("get_road_condition_risk")
 def get_road_condition_risk(start_date: str = "", end_date: str = "", geography: str = "") -> str:
-    """Analyze accident risk by road conditions and road types.
+    """Analyze accident risk by accident location type and weather conditions.
     
     Args:
         start_date: Start date (YYYY-MM-DD) or empty for all
@@ -394,12 +394,12 @@ def get_road_condition_risk(start_date: str = "", end_date: str = "", geography:
         geography: Province/district name filter or empty for all
     
     Returns:
-        Road conditions and types associated with highest accident rates.
+        Accident location types and weather associated with highest accident rates.
     """
     try:
         sql = """
             SELECT
-                e.road_condition,
+                e.accident_location,
                 e.weather_condition,
                 r.road_type,
                 COUNT(*) AS accident_count,
@@ -407,7 +407,7 @@ def get_road_condition_risk(start_date: str = "", end_date: str = "", geography:
                 SUM(e.death_count) AS total_deaths
             FROM fact_accident_event e
             LEFT JOIN dim_road_segment r ON e.road_segment_id = r.road_segment_id
-            GROUP BY e.road_condition, e.weather_condition, r.road_type
+            GROUP BY e.accident_location, e.weather_condition, r.road_type
             ORDER BY accident_count DESC
             LIMIT 20
         """
@@ -416,12 +416,12 @@ def get_road_condition_risk(start_date: str = "", end_date: str = "", geography:
         return "ยังไม่มีตาราง fact_accident_event / dim_road_segment — กรุณา run migration ก่อน"
 
     if not rows:
-        return "ไม่พบข้อมูลความเสี่ยงสภาพถนน"
+        return "ไม่พบข้อมูลความเสี่ยงสภาพแวดล้อม"
 
-    lines = ["ความเสี่ยงอุบัติเหตุตามสภาพถนน:"]
+    lines = ["ความเสี่ยงอุบัติเหตุตามบริเวณที่เกิดเหตุ:"]
     for r in rows:
         lines.append(
-            f"  สภาพถนน: {r.get('road_condition', 'N/A')}, "
+            f"  บริเวณ: {r.get('accident_location', 'ไม่ระบุ')}, "
             f"สภาพอากาศ: {r.get('weather_condition', 'N/A')}, "
             f"ประเภทถนน: {r.get('road_type', 'N/A')}, "
             f"อุบัติเหตุ: {r['accident_count']}, "

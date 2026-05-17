@@ -311,8 +311,8 @@ def _query_environment_risk(provinces: str) -> str:
     clause, params = _province_clause("g", provinces)
     sql = f"""
         SELECT
-            e.light_condition,
-            e.road_condition,
+            e.weather_condition,
+            e.accident_location,
             e.severity_level,
             COUNT(*)               AS accident_count,
             SUM(e.death_count)     AS death_count,
@@ -320,7 +320,7 @@ def _query_environment_risk(provinces: str) -> str:
         FROM fact_accident_event e
         JOIN dim_geography g ON e.geography_id = g.geography_id
         WHERE {clause}
-        GROUP BY e.light_condition, e.road_condition, e.severity_level
+        GROUP BY e.weather_condition, e.accident_location, e.severity_level
         ORDER BY death_count DESC
         LIMIT 40
     """
@@ -334,14 +334,14 @@ def _query_environment_risk(provinces: str) -> str:
 
     prov_label = provinces.strip() or "เขตสุขภาพที่ 10"
     lines = [
-        f"[Q5-Environment] ความสัมพันธ์สภาพแสง/สภาพถนน กับความรุนแรง — {prov_label}:",
-        f"  {'สภาพแสง':<25} {'สภาพถนน':<20} {'ระดับความรุนแรง':<18} {'อุบัติเหตุ':>10} {'เสียชีวิต':>9} {'สาหัส':>6}",
-        "  " + "-" * 95,
+        f"[Q5-Environment] สภาพอากาศ/บริเวณที่เกิดเหตุ กับความรุนแรง — {prov_label}:",
+        f"  {'สภาพอากาศ':<25} {'บริเวณที่เกิดเหตุ':<30} {'ระดับความรุนแรง':<18} {'อุบัติเหตุ':>10} {'เสียชีวิต':>9} {'สาหัส':>6}",
+        "  " + "-" * 105,
     ]
     for r in rows:
         lines.append(
-            f"  {(r['light_condition'] or 'ไม่ระบุ'):<25} "
-            f"{(r['road_condition'] or 'ไม่ระบุ'):<20} "
+            f"  {(r['weather_condition'] or 'ไม่ระบุ'):<25} "
+            f"{(r['accident_location'] or 'ไม่ระบุ'):<30} "
             f"{(r['severity_level'] or 'ไม่ระบุ'):<18} "
             f"{r['accident_count'] or 0:>10,} "
             f"{r['death_count'] or 0:>9,} "
@@ -351,8 +351,8 @@ def _query_environment_risk(provinces: str) -> str:
     lines.append("\n  สภาพแวดล้อมที่มีผู้เสียชีวิตสูงสุด 3 อันดับแรก:")
     for i, r in enumerate(top3, 1):
         lines.append(
-            f"    {i}. แสง: {r['light_condition'] or 'ไม่ระบุ'} | "
-            f"ถนน: {r['road_condition'] or 'ไม่ระบุ'} → "
+            f"    {i}. อากาศ: {r['weather_condition'] or 'ไม่ระบุ'} | "
+            f"บริเวณ: {r['accident_location'] or 'ไม่ระบุ'} → "
             f"เสียชีวิต {r['death_count'] or 0:,} ราย"
         )
     return "\n".join(lines)
@@ -360,9 +360,9 @@ def _query_environment_risk(provinces: str) -> str:
 
 @tool("get_zone10_environment_risk")
 def get_zone10_environment_risk(provinces: str = "") -> str:
-    """Q5 (Environment): Accident severity vs light_condition + road_condition in Zone 10.
+    """Q5 (Environment): Accident severity vs weather_condition + accident_location in Zone 10.
 
-    Answers: "สภาพแสงและสภาพถนนแบบใดทำให้เกิดอุบัติเหตุรุนแรงที่สุด?"
+    Answers: "สภาพอากาศและบริเวณที่เกิดเหตุแบบใดทำให้เกิดอุบัติเหตุรุนแรงที่สุด?"
 
     Args:
         provinces: Comma-separated Zone 10 province names (Thai). Empty = all 5.

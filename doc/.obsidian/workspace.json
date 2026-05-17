@@ -27,6 +27,20 @@
             "state": {
               "type": "markdown",
               "state": {
+                "file": "07 - Project Overview/_index.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "_index"
+            }
+          },
+          {
+            "id": "c5556063d8f4f34f",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
                 "file": "01 - Architecture/01.03 - Database & API Reference.md",
                 "mode": "source",
                 "source": false
@@ -36,7 +50,7 @@
             }
           }
         ],
-        "currentTab": 1
+        "currentTab": 2
       }
     ],
     "direction": "vertical"
@@ -68,7 +82,7 @@
             "state": {
               "type": "search",
               "state": {
-                "query": "",
+                "query": "Database",
                 "matchingCase": false,
                 "explainSearch": false,
                 "collapseAll": false,
@@ -199,38 +213,43 @@
       "bases:Create new base": false
     }
   },
-  "active": "e6321d9068d6d34b",
+  "active": "c5556063d8f4f34f",
   "lastOpenFiles": [
-    "07 - Project Overview/_index.md",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.3a3761be02d4",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.da39df25860f",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.4b8909ed7d52",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.9bd31d3243b6",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.0b7433a60445",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.9db40cf94a8c",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.7d872acad976",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.e2056f0eca60",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.1627b6d45214",
+    "01 - Architecture/01.03 - Database & API Reference.md.tmp.9824.17a674d0e53a",
+    "01 - Architecture/01.02 - Strategic Design & Roadmap.md",
+    "01 - Architecture/_index.md",
+    "01 - Architecture/01.01 - System Architecture.md",
+    "01 - Architecture/01.04 - Subsystem Architecture.md",
+    "01 - Architecture/01.05 - Adaptive Agent Workflow.md",
+    "01 - Architecture/01.06 - Agentic AI RAG Design.md",
+    "01 - Architecture/01.03 - Database & API Reference.md",
+    "EXPORT_GUIDE.md",
     "07 - Project Overview/07.03 - Setup and Run Guide.md",
+    "07 - Project Overview/_index.md",
     "00 - Home.md",
+    "EXPORT_GUIDE.md.tmp.9824.8333b9a596ea",
     "04 - Testing & QA/04.02 - Test UI - Policy Brief.md",
     "04 - Testing & QA/_index.md",
     "04 - Testing & QA/04.01 - Test UI - Unified Router.md",
-    "01 - Architecture/_index.md",
-    "01 - Architecture/01.03 - Database & API Reference.md",
     "02 - Agents/02.06 - Plan - Accident Policy Agent.md",
-    "01 - Architecture/01.01 - System Architecture.md",
     "raw_doc/DATABASE_API_ARCHITECTURE.md",
     "02 - Agents/02.02 - Agent - SQL Specialist.md",
     "02 - Agents/_index.md",
     "03 - Subsystems/03.03 - Short Chat Pipeline.md",
     "03 - Subsystems/_index.md",
     "02 - Agents/02.01 - Agent Workflows.md",
-    "01 - Architecture/01.02 - Strategic Design & Roadmap.md",
     "07 - Project Overview/07.02 - Code Alignment Report.md",
     "02 - Agents/02.03 - Agent - Citation & Evidence.md",
     "02 - Agents/02.04 - Reference - APA Format.md",
-    "02 - Agents/02.05 - Plan - Field Enricher Agent.md",
-    "07 - Project Overview/07.01 - Project Documentation.md",
-    "06 - Status & Plans/06.03 - Log - Shared Agent Implementation.md",
-    "04 - Testing & QA/04.04 - Testing Summary.md",
-    "01 - Architecture/01.06 - Agentic AI RAG Design.md",
-    "01 - Architecture/01.05 - Adaptive Agent Workflow.md",
-    "raw_doc/system overview.docx",
-    "raw_doc/Agentic AI and RAG with Database Design.docx",
-    "raw_doc",
-    "02 - Agents/02.03 - Agent - Citation & Evidence.md.tmp.7428.1778913896389",
-    "02 - Agents/02.01 - Agent Workflows.md.tmp.7428.1778913889686"
+    "02 - Agents/02.05 - Plan - Field Enricher Agent.md"
   ]
 }

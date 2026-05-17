@@ -99,17 +99,19 @@ Agent/
 │   │   ├── policy_report_writer.py # Policy Brief report writer
 │   │   ├── accident_policy_agent.py # Zone 10 agents (Fetcher, Analyst, Writer)
 │   │   ├── accident_policy_orchestrator.py # Zone 10 pipeline runner
+│   │   ├── accident_chat_orchestrator.py # Accident Chat pipeline runner
 │   │   ├── progress.py         # Progress tracking for SSE streaming
 │   │   └── __init__.py
-│   ├── tools/                  # CrewAI tool functions (7 files)
+│   ├── tools/                  # CrewAI tool functions (8 files)
 │   │   ├── accident.py         # 7 accident data tools (province, roads, ranking, etc.)
 │   │   ├── chart_builder.py    # 7 chart-building tools (trend, hotspot, pie, etc.)
 │   │   ├── common.py           # search_documents, get_indicator_catalog, get_geography_profile
 │   │   ├── sql_tools.py        # execute_custom_sql, explain_schema, get_table_row_count
 │   │   ├── thaijo.py           # search_thaijo (TCI-THAIJO academic search)
 │   │   ├── notebooklm.py       # nlm_ask, get_supported_provinces (NotebookLM)
-│   │   └── zone10_accident.py  # 7 policy query tools for Zone 10
-│   ├── routers/                # FastAPI route handlers (11 files)
+│   │   ├── zone10_accident.py  # 7 policy query tools for Zone 10
+│   │   └── accident_chat_sql.py # Tools for Accident Chat agent
+│   ├── routers/                # FastAPI route handlers (13 files)
 │   │   ├── chat.py             # POST /api/chat, /api/chat/unified, /api/chat/stream
 │   │   ├── health.py           # GET /api/health
 │   │   ├── ingest.py           # POST /api/ingest
@@ -119,6 +121,8 @@ Agent/
 │   │   ├── citation.py         # GET /api/citations/session/*, /document/*
 │   │   ├── policy_brief.py     # POST /api/policy-brief
 │   │   ├── accident_policy.py  # POST /api/accident-policy/zone10
+│   │   ├── accident_chat.py    # POST /api/accident-chat/ask
+│   │   ├── db_explorer.py      # GET /api/db/tables, /columns, /rows
 │   │   ├── thaijo.py           # POST /api/thaijo/search, GET /api/thaijo/status
 │   │   └── test_ui.py          # Test UI routes
 │   ├── schemas/                # Pydantic request/response models
@@ -126,7 +130,8 @@ Agent/
 │   │   ├── response.py         # AgentResponse, ChartSpec, TableSpec, Citation
 │   │   ├── evidence.py         # EvidenceItem, Claim, ClaimEvidenceLink, CoverageReport
 │   │   ├── policy_brief.py     # PolicyBriefRequest, PolicyBriefResponse
-│   │   └── accident_policy.py  # AccidentPolicyRequest, AccidentPolicyResponse
+│   │   ├── accident_policy.py  # AccidentPolicyRequest, AccidentPolicyResponse
+│   │   └── accident_chat.py    # AccidentChatRequest, AccidentChatResponse
 │   ├── rag/                    # RAG (Retrieval-Augmented Generation) layer
 │   │   ├── document_rag.py     # PDF/DOCX extraction, chunking, ingestion, search
 │   │   ├── vector_store.py     # pgvector client (psycopg2 + Gemini embeddings), add/search documents
@@ -275,6 +280,16 @@ Agent/
 | `POST` | `/api/policy-brief/stream` | Policy Brief SSE streaming |
 | `POST` | `/api/accident-policy/zone10` | Accident Policy Pipeline (Zone 10) |
 | `GET`  | `/api/accident-policy/zone10/data` | Raw SQL data for 7 policy queries |
+| `POST` | `/api/accident-chat/ask` | Accident Chat Pipeline |
+| `POST` | `/api/accident-chat/ask/stream` | Accident Chat SSE streaming |
+| `POST` | `/api/accident-chat/quick` | Raw SQL data for accident chat tools |
+
+### Database Explorer
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/db/tables` | List all tables |
+| `GET` | `/api/db/tables/{table}/columns` | List columns for a table |
+| `GET` | `/api/db/tables/{table}/rows` | Paginated rows |
 
 ### Document Management
 | Method | Path | Description |

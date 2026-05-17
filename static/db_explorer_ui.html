@@ -14,11 +14,16 @@
     .sidebar-item.active { background: #6366f1; color: white; }
     .sidebar-item.active .badge { background: rgba(255,255,255,0.25); color: white; }
     .badge { background: #e0e7ff; color: #4338ca; font-size: 0.7rem; padding: 1px 6px; border-radius: 9999px; font-weight: 600; }
-    .grid-table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
-    .grid-table th { background: #f1f5f9; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #e2e8f0; padding: 6px 10px; text-align: left; white-space: nowrap; cursor: pointer; user-select: none; }
+    .grid-table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 0.8rem; }
+    .grid-table th { background: #f1f5f9; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #e2e8f0; padding: 6px 10px; text-align: left; white-space: nowrap; cursor: pointer; user-select: none; min-width: 80px; }
     .grid-table th:hover { background: #e0e7ff; }
-    .grid-table td { border-bottom: 1px solid #f1f5f9; padding: 5px 10px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
+    .grid-table td { border-bottom: 1px solid #f1f5f9; padding: 5px 10px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
+    .grid-table td.expand { white-space: normal; word-break: break-all; max-width: 360px; }
     .grid-table tr:hover td { background: #f8fafc; }
+    .col-type { font-size: 0.65rem; color: #94a3b8; font-weight: 400; display: block; }
+    .top-scroll-bar { overflow-x: auto; overflow-y: hidden; height: 12px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+    .top-scroll-bar-inner { height: 1px; }
+    .schema-pill { display: inline-block; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 1px 6px; font-size: 0.7rem; color: #475569; margin: 1px; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
     .null-val { color: #94a3b8; font-style: italic; }
     .vec-val { color: #8b5cf6; font-size: 0.7rem; }
     ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -93,6 +98,19 @@
         </div>
       </div>
 
+      <!-- Schema bar (column list) -->
+      <div id="schema-bar" class="hidden bg-indigo-50 border-b border-indigo-100 px-4 py-2 overflow-x-auto">
+        <div class="flex items-center gap-1 flex-wrap">
+          <span class="text-xs font-semibold text-indigo-400 mr-1 flex-shrink-0">Columns:</span>
+          <div id="schema-pills"></div>
+        </div>
+      </div>
+
+      <!-- Top mirror scrollbar -->
+      <div class="top-scroll-bar" id="top-scroll">
+        <div class="top-scroll-bar-inner" id="top-scroll-inner"></div>
+      </div>
+
       <!-- Table scroll area -->
       <div class="flex-1 overflow-auto" id="table-scroll">
         <div id="loading-row" class="hidden px-6 py-8 text-center text-sm text-gray-400">
@@ -153,6 +171,24 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('filter-val').addEventListener('keydown', e => {
     if (e.key === 'Enter') applyFilter();
+  });
+  // Sync top ↔ bottom horizontal scrollbar
+  const topScroll = document.getElementById('top-scroll');
+  const tableScroll = document.getElementById('table-scroll');
+  let syncingTop = false, syncingBottom = false;
+  topScroll.addEventListener('scroll', () => {
+    if (syncingBottom) return;
+    syncingTop = true;
+    tableScroll.scrollLeft = topScroll.scrollLeft;
+    syncingTop = false;
+  });
+  tableScroll.addEventListener('scroll', () => {
+    if (syncingTop) return;
+    syncingBottom = true;
+    topScroll.scrollLeft = tableScroll.scrollLeft;
+    document.getElementById('top-scroll-inner').style.width =
+      document.getElementById('data-table').scrollWidth + 'px';
+    syncingBottom = false;
   });
 });
 
@@ -221,6 +257,7 @@ async function loadColumns(name) {
     const res = await fetch(`/api/db/tables/${encodeURIComponent(name)}/columns`);
     const data = await res.json();
     state.columns = data.columns;
+    // Filter dropdown
     const sel = document.getElementById('filter-col');
     data.columns.forEach(c => {
       const opt = document.createElement('option');
@@ -228,9 +265,25 @@ async function loadColumns(name) {
       opt.textContent = `${c.name} (${c.data_type})`;
       sel.appendChild(opt);
     });
+    // Schema bar
+    const pills = document.getElementById('schema-pills');
+    pills.innerHTML = data.columns.map(c =>
+      `<span class="schema-pill" title="${escHtml(c.data_type)}">${escHtml(c.name)}<span style="color:#94a3b8"> ${escHtml(shortType(c.data_type))}</span></span>`
+    ).join('');
+    document.getElementById('schema-bar').classList.remove('hidden');
   } catch (e) {
     console.error('Failed to load columns', e);
   }
+}
+
+function shortType(t) {
+  const m = {
+    'character varying': 'varchar', 'timestamp without time zone': 'timestamp',
+    'timestamp with time zone': 'timestamptz', 'double precision': 'float8',
+    'integer': 'int', 'bigint': 'bigint', 'boolean': 'bool',
+    'text': 'text', 'numeric': 'numeric', 'jsonb': 'jsonb', 'json': 'json',
+  };
+  return m[t] || t.split('(')[0].slice(0, 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,15 +329,19 @@ function renderGrid(rows, columns) {
   if (rows.length === 0) {
     thead.innerHTML = '';
     tbody.innerHTML = `<tr><td colspan="99" class="px-4 py-8 text-center text-gray-400 text-sm">No rows found</td></tr>`;
+    syncTopScrollbar();
     return;
   }
 
   // Use server column order if available, otherwise derive from first row
   const colNames = columns.length ? columns.map(c => c.name) : Object.keys(rows[0]);
+  const colTypeMap = {};
+  columns.forEach(c => colTypeMap[c.name] = shortType(c.data_type));
 
-  thead.innerHTML = `<tr>${colNames.map(c =>
-    `<th onclick="setFilterCol('${c}')" title="Click to filter by this column">${escHtml(c)}</th>`
-  ).join('')}</tr>`;
+  thead.innerHTML = `<tr>${colNames.map(c => {
+    const t = colTypeMap[c] || '';
+    return `<th onclick="setFilterCol('${escHtml(c)}')" title="Click to filter · type: ${t}">${escHtml(c)}<span class="col-type">${t}</span></th>`;
+  }).join('')}</tr>`;
 
   tbody.innerHTML = rows.map(row =>
     `<tr>${colNames.map(c => {
@@ -292,11 +349,24 @@ function renderGrid(rows, columns) {
       if (v === null || v === undefined) return `<td><span class="null-val">NULL</span></td>`;
       const s = String(v);
       if (s === '[…vector…]') return `<td><span class="vec-val">[…vector…]</span></td>`;
-      const display = s.length > 120 ? s.slice(0, 120) + '…' : s;
-      return `<td title="${escHtml(s)}">${escHtml(display)}</td>`;
+      const display = s.length > 140 ? s.slice(0, 140) + '…' : s;
+      return `<td title="${escHtml(s)}" ondblclick="this.classList.toggle('expand')">${escHtml(display)}</td>`;
     }).join('')}</tr>`
   ).join('');
+
+  syncTopScrollbar();
 }
+
+function syncTopScrollbar() {
+  const table = document.getElementById('data-table');
+  const topScroll = document.getElementById('top-scroll');
+  const inner = document.getElementById('top-scroll-inner');
+  // Set inner width to match table scroll width
+  requestAnimationFrame(() => {
+    inner.style.width = table.scrollWidth + 'px';
+  });
+}
+
 
 // ---------------------------------------------------------------------------
 // Pagination
