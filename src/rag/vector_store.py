@@ -154,6 +154,7 @@ def search_documents(
     collection_name: str | None = None,
 ) -> list[dict]:
     """Semantic search using cosine similarity via pgvector."""
+    global _conn
     s = get_settings()
     collection = collection_name or s.PGVECTOR_COLLECTION
 
@@ -182,23 +183,32 @@ def search_documents(
 
     conn = _get_conn()
     docs = []
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, params)
-        rows = cur.fetchall()
-        for row in rows:
-            docs.append({
-                "id": row["id"],
-                "text": row["document"],
-                "distance": float(1 - row["similarity"]),  # cosine distance (lower = closer)
-                "metadata": {
-                    "source": row["source"],
-                    "title": row["title"],
-                    "topic": row["topic"],
-                    "chunk_index": row["chunk_index"],
-                    "total_chunks": row["total_chunks"],
-                    "page_ref": row["page_ref"],
-                    "section_label": row["section_label"],
-                    "total_pages": row["total_pages"],
-                },
-            })
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            for row in rows:
+                docs.append({
+                    "id": row["id"],
+                    "text": row["document"],
+                    "distance": float(1 - row["similarity"]),  # cosine distance (lower = closer)
+                    "metadata": {
+                        "source": row["source"],
+                        "title": row["title"],
+                        "topic": row["topic"],
+                        "chunk_index": row["chunk_index"],
+                        "total_chunks": row["total_chunks"],
+                        "page_ref": row["page_ref"],
+                        "section_label": row["section_label"],
+                        "total_pages": row["total_pages"],
+                    },
+                })
+    except Exception:
+        # Reset stale connection so the next call can re-connect
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _conn = None
+        raise
     return docs

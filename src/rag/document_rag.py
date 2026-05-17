@@ -323,12 +323,16 @@ def search(query: str, topic: str | None = None, n_results: int = 5) -> list[dic
     if topic:
         topic = _TOPIC_ALIASES.get(topic.lower(), topic)
 
-    where = {"topic": topic} if topic else None
-    results = search_documents(query=query, n_results=n_results, where=where)
+    try:
+        where = {"topic": topic} if topic else None
+        results = search_documents(query=query, n_results=n_results, where=where)
 
-    # Fallback: retry without topic filter if filtered search returns nothing
-    if not results and where is not None:
-        logger.debug("search(): no results for topic=%s, retrying without filter", topic)
-        results = search_documents(query=query, n_results=n_results, where=None)
+        # Fallback: retry without topic filter if filtered search returns nothing
+        if not results and where is not None:
+            logger.debug("search(): no results for topic=%s, retrying without filter", topic)
+            results = search_documents(query=query, n_results=n_results, where=None)
+    except Exception as e:
+        logger.warning("document_rag.search(): vector store unavailable — %s", e)
+        results = []
 
     return results

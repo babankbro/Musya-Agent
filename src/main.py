@@ -20,6 +20,9 @@ from src.config import get_settings
 from src.db.pool import get_async_pool, close_async_pool, close_sync_pool
 from src.routers import health, chat, ingest, test_ui, evidence, upload, documents, citation, policy_brief
 from src.routers.thaijo import router as thaijo_router
+from src.routers.db_explorer import router as db_explorer_router
+from src.routers.accident_policy import router as accident_policy_router
+from src.routers.accident_chat import router as accident_chat_router
 
 # Apply 429 backoff patch at module load time (before any request is handled)
 from src.agents.agent_defaults import _patch_gemini_429_backoff
@@ -100,6 +103,9 @@ app.include_router(citation.router)
 app.include_router(policy_brief.router)
 app.include_router(thaijo_router)
 app.include_router(test_ui.router)
+app.include_router(db_explorer_router)
+app.include_router(accident_policy_router)
+app.include_router(accident_chat_router)
 
 
 @app.get("/")
@@ -138,6 +144,33 @@ async def unified_test_ui_page():
     import pathlib
     from fastapi.responses import HTMLResponse
     html_path = pathlib.Path(__file__).parent.parent / "static" / "unified_test_ui.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@app.get("/accident-chat")
+async def accident_chat_ui_page():
+    """Serve the Zone 10 Accident Chat UI."""
+    import pathlib
+    from fastapi.responses import HTMLResponse
+    html_path = pathlib.Path(__file__).parent.parent / "static" / "accident_chat_ui.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@app.get("/accident-policy")
+async def accident_policy_ui_page():
+    """Serve the Zone 10 Accident Policy UI."""
+    import pathlib
+    from fastapi.responses import HTMLResponse
+    html_path = pathlib.Path(__file__).parent.parent / "static" / "accident_policy_ui.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@app.get("/db-explorer")
+async def db_explorer_ui_page():
+    """Serve the Database Explorer UI."""
+    import pathlib
+    from fastapi.responses import HTMLResponse
+    html_path = pathlib.Path(__file__).parent.parent / "static" / "db_explorer_ui.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
 
 

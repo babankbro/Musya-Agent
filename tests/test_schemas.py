@@ -47,7 +47,7 @@ class TestAgentResponse:
         resp = AgentResponse(
             content="รายงานอุบัติเหตุ",
             topic="accident",
-            charts=[ChartSpec(chart_type="bar", title="อุบัติเหตุรายเดือน")],
+            charts=[ChartSpec(type="bar", title="อุบัติเหตุรายเดือน", data={"labels": [], "datasets": []})],
             tables=[TableSpec(table_name="สรุป", columns=["เดือน", "จำนวน"], rows=[["ม.ค.", 10]])],
             citations=[Citation(citation_code="C-001", source_type="database", source_ref="mart_accident_summary")],
             follow_ups=["คำถามติดตาม 1", "คำถามติดตาม 2"],
@@ -55,7 +55,7 @@ class TestAgentResponse:
         )
         assert resp.topic == "accident"
         assert len(resp.charts) == 1
-        assert resp.charts[0].chart_type == "bar"
+        assert resp.charts[0].type == "bar"
         assert len(resp.tables) == 1
         assert resp.tables[0].rows[0][1] == 10
         assert len(resp.citations) == 1
@@ -65,9 +65,9 @@ class TestAgentResponse:
 class TestChartSpec:
 
     def test_chart_spec(self):
-        chart = ChartSpec(chart_type="line", title="Trend")
-        assert chart.x_label == ""
-        assert chart.data == {}
+        chart = ChartSpec(type="line", title="Trend", data={"labels": [], "datasets": []})
+        assert chart.type == "line"
+        assert chart.data == {"labels": [], "datasets": []}
 
 
 class TestTableSpec:

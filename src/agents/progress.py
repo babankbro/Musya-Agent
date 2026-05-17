@@ -72,6 +72,11 @@ SHORT_CHAT_PIPELINE_AGENTS = [
     {"name": "Quick Answer Writer", "icon": "✍️", "order": 3},
 ]
 
+ACCIDENT_CHAT_PIPELINE_AGENTS = [
+    {"name": "Accident SQL Agent", "icon": "🗄️", "order": 0},
+    {"name": "Accident Answer Writer", "icon": "📋", "order": 1},
+]
+
 
 def create_progress_queue(request_id: str) -> queue.Queue:
     """Create a new progress queue for a request."""
@@ -106,7 +111,9 @@ def emit_progress(
         return
     
     # Find agent metadata
-    all_agents = CHAT_PIPELINE_AGENTS + POLICY_PIPELINE_AGENTS + THAIJO_RESEARCH_PIPELINE_AGENTS
+    all_agents = (CHAT_PIPELINE_AGENTS + POLICY_PIPELINE_AGENTS
+                  + THAIJO_RESEARCH_PIPELINE_AGENTS + SHORT_CHAT_PIPELINE_AGENTS
+                  + ACCIDENT_CHAT_PIPELINE_AGENTS)
     agent_meta = next((a for a in all_agents if a["name"] == agent_name), None)
     icon = agent_meta["icon"] if agent_meta else "🤖"
     order = agent_meta["order"] if agent_meta else 0
@@ -144,4 +151,8 @@ def get_pipeline_agents(pipeline: str) -> list[dict]:
         return POLICY_PIPELINE_AGENTS
     if pipeline == "thaijo_research_pipeline":
         return THAIJO_RESEARCH_PIPELINE_AGENTS
+    if pipeline == "short_chat":
+        return SHORT_CHAT_PIPELINE_AGENTS
+    if pipeline == "accident_chat":
+        return ACCIDENT_CHAT_PIPELINE_AGENTS
     return CHAT_PIPELINE_AGENTS

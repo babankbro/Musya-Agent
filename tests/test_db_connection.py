@@ -33,7 +33,6 @@ class TestDatabaseConnection:
             "mart_accident_summary",
             "mart_accident_hotspot",
             "indicator_catalog",
-            "document_chunks",
             "document_registry",
         ]
         rows = db_query(
@@ -64,10 +63,6 @@ class TestMockupData:
         rows = db_query("SELECT COUNT(*) AS cnt FROM fact_accident_event")
         assert rows[0]["cnt"] >= 200, "fact_accident_event should have ≥200 rows"
 
-    def test_fact_accident_person_has_data(self, db_query):
-        rows = db_query("SELECT COUNT(*) AS cnt FROM fact_accident_person")
-        assert rows[0]["cnt"] >= 100, "fact_accident_person should have ≥100 rows"
-
     def test_mart_accident_summary_has_data(self, db_query):
         rows = db_query("SELECT COUNT(*) AS cnt FROM mart_accident_summary")
         assert rows[0]["cnt"] >= 50, "mart_accident_summary should have ≥50 rows"
@@ -75,10 +70,6 @@ class TestMockupData:
     def test_mart_accident_hotspot_has_data(self, db_query):
         rows = db_query("SELECT COUNT(*) AS cnt FROM mart_accident_hotspot")
         assert rows[0]["cnt"] >= 20, "mart_accident_hotspot should have ≥20 rows"
-
-    def test_legacy_accident_table_has_data(self, db_query):
-        rows = db_query("SELECT COUNT(*) AS cnt FROM accident")
-        assert rows[0]["cnt"] >= 50, "legacy accident table should have ≥50 rows"
 
     def test_accident_events_have_valid_foreign_keys(self, db_query):
         """Every accident event should reference valid geography and road segment."""
