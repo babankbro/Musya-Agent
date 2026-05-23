@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     OBSIDIAN_DEFAULT_VAULT: str = "health_region_10"
     OBSIDIAN_ENABLED: bool = True
     OBSIDIAN_SEARCH_THRESHOLD: float = 0.1  # pg_trgm similarity threshold
+    OBSIDIAN_RAW_PDF_PATH: str = "obsidian_raw_pdf"   # relative to Agent/ root
+    OBSIDIAN_PDF_MINIO_PREFIX: str = "obsidian-pdfs"  # MinIO object prefix
 
     # Server
     HOST: str = "0.0.0.0"

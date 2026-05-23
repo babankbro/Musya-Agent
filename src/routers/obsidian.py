@@ -17,6 +17,11 @@ from src.schemas.obsidian import (
     ObsidianVaultInfo,
     ObsidianIndexRequest,
     ObsidianIndexResult,
+    ObsidianPdfAsset,
+    ObsidianPdfSyncResult,
+    ObsidianPdfListResponse,
+    ObsidianNotePdfPair,
+    ObsidianNotePdfPairsResponse,
 )
 from src.tools.obsidian import _search_obsidian_impl, _read_note_impl, _list_notes_impl
 from src.agents.progress import create_progress_queue, remove_progress_queue
@@ -281,4 +286,204 @@ async def index_vault(req: ObsidianIndexRequest):
         )
     except Exception as exc:
         logger.exception("[obsidian] index error: %s", exc)
+        raise HTTPException(status_code=500, detail={"error": str(exc)})
+
+
+# ── PDF Assets ─────────────────────────────────────────────────────────────────
+
+@router.post("/pdfs/sync", response_model=ObsidianPdfSyncResult)
+async def sync_pdfs_to_minio():
+    """Upload all raw PDFs from obsidian_raw_pdf/ to MinIO and record in DB.
+
+    Long-running (~1-5 min for 353 files). Idempotent — skips already-uploaded paths.
+    """
+    logger.info("[obsidian] pdf sync requested")
+    loop = asyncio.get_event_loop()
+    try:
+        from scripts.sync_obsidian_pdfs import sync_pdfs
+        result = await loop.run_in_executor(None, sync_pdfs)
+        return ObsidianPdfSyncResult(**result)
+    except Exception as exc:
+        logger.exception("[obsidian] pdf sync error: %s", exc)
+        raise HTTPException(status_code=500, detail={"error": str(exc)})
+
+
+@router.get("/pdfs", response_model=ObsidianPdfListResponse)
+async def list_pdf_assets(
+    province: str = Query(default="", description="กรองตามจังหวัด (optional)"),
+):
+    """List PDF assets stored in MinIO, optionally filtered by province."""
+    try:
+        from src.db.pool import query_db
+        if province:
+            rows = query_db(
+                "SELECT id, province, note_id, filename, minio_path, minio_url, "
+                "file_size, content_type, synced_at "
+                "FROM obsidian_pdf_assets WHERE province = %s ORDER BY filename",
+                (province,),
+            )
+        else:
+            rows = query_db(
+                "SELECT id, province, note_id, filename, minio_path, minio_url, "
+                "file_size, content_type, synced_at "
+                "FROM obsidian_pdf_assets ORDER BY province, filename",
+                (),
+            )
+        assets = [
+            ObsidianPdfAsset(
+                id=r["id"],
+                province=r["province"],
+                note_id=r.get("note_id"),
+                filename=r["filename"],
+                minio_path=r["minio_path"],
+                minio_url=r["minio_url"],
+                file_size=r.get("file_size"),
+                content_type=r.get("content_type", "application/pdf"),
+                synced_at=str(r["synced_at"]) if r.get("synced_at") else None,
+            )
+            for r in rows
+        ]
+        return ObsidianPdfListResponse(
+            count=len(assets),
+            province=province or None,
+            assets=assets,
+        )
+    except Exception as exc:
+        logger.exception("[obsidian] pdf list error: %s", exc)
+        raise HTTPException(status_code=500, detail={"error": str(exc)})
+
+
+@router.get("/pdfs/note/{note_id:path}", response_model=ObsidianPdfListResponse)
+async def list_pdfs_for_note(note_id: str):
+    """List all PDFs for a note's province (province-level grouping).
+
+    Looks up the note's province, then returns all PDF assets for that province.
+    """
+    try:
+        from src.db.pool import query_db
+        note_rows = query_db(
+            "SELECT province FROM obsidian_notes WHERE note_id = %s LIMIT 1",
+            (note_id,),
+        )
+        if not note_rows:
+            raise HTTPException(status_code=404, detail=f"Note not found: {note_id}")
+
+        province = note_rows[0]["province"]
+        if not province:
+            return ObsidianPdfListResponse(count=0, province=None, assets=[])
+
+        rows = query_db(
+            "SELECT id, province, note_id, filename, minio_path, minio_url, "
+            "file_size, content_type, synced_at "
+            "FROM obsidian_pdf_assets WHERE province = %s ORDER BY filename",
+            (province,),
+        )
+        assets = [
+            ObsidianPdfAsset(
+                id=r["id"],
+                province=r["province"],
+                note_id=r.get("note_id"),
+                filename=r["filename"],
+                minio_path=r["minio_path"],
+                minio_url=r["minio_url"],
+                file_size=r.get("file_size"),
+                content_type=r.get("content_type", "application/pdf"),
+                synced_at=str(r["synced_at"]) if r.get("synced_at") else None,
+            )
+            for r in rows
+        ]
+        return ObsidianPdfListResponse(
+            count=len(assets),
+            province=province,
+            assets=assets,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("[obsidian] pdf note list error: %s", exc)
+        raise HTTPException(status_code=500, detail={"error": str(exc)})
+
+
+@router.get("/pdfs/pairs", response_model=ObsidianNotePdfPairsResponse)
+async def list_note_pdf_pairs(
+    province: str = Query(default="", description="กรองตามจังหวัด (optional)"),
+    vault_id: str = Query(default="health_region_10"),
+):
+    """Return every note paired with its directly-linked PDFs (via note_id FK).
+
+    Populated by run_update_pdf_note_fk.py which basename-matches source_file
+    against obsidian_pdf_assets.filename.  Notes with no FK match still appear
+    (direct_pdfs=[], match_type='none') so the UI can show coverage gaps.
+    """
+    try:
+        from src.db.pool import query_db
+
+        # Single LEFT JOIN — one row per (note, pdf); note with no PDF → pdf cols NULL
+        sql = """
+            SELECT
+                n.note_id, n.title, n.province, n.district, n.note_type,
+                n.tags, n.source_file, n.year,
+                p.id          AS asset_id,
+                p.filename    AS pdf_filename,
+                p.minio_path,
+                p.minio_url,
+                p.file_size,
+                p.content_type,
+                p.synced_at
+            FROM obsidian_notes n
+            LEFT JOIN obsidian_pdf_assets p ON p.note_id = n.note_id
+            WHERE n.vault_id = %s
+              AND (%s = '' OR n.province = %s)
+            ORDER BY n.province NULLS LAST, n.title NULLS LAST, p.filename NULLS LAST
+        """
+        rows = query_db(sql, (vault_id, province, province))
+
+        # Group rows by note_id
+        from collections import OrderedDict
+        pairs_map: dict[str, ObsidianNotePdfPair] = OrderedDict()
+
+        for r in rows:
+            nid = r["note_id"]
+            if nid not in pairs_map:
+                pairs_map[nid] = ObsidianNotePdfPair(
+                    note_id=nid,
+                    title=r.get("title"),
+                    province=r.get("province"),
+                    district=r.get("district"),
+                    note_type=r.get("note_type"),
+                    tags=list(r.get("tags") or []),
+                    year=r.get("year"),
+                    source_file=r.get("source_file"),
+                    direct_pdfs=[],
+                    match_type="none",
+                )
+
+            # Add PDF if this row has one (LEFT JOIN → asset_id may be None)
+            if r.get("asset_id") is not None:
+                pairs_map[nid].direct_pdfs.append(ObsidianPdfAsset(
+                    id=r["asset_id"],
+                    province=r.get("province") or "",
+                    note_id=nid,
+                    filename=r["pdf_filename"],
+                    minio_path=r["minio_path"],
+                    minio_url=r["minio_url"],
+                    file_size=r.get("file_size"),
+                    content_type=r.get("content_type", "application/pdf"),
+                    synced_at=str(r["synced_at"]) if r.get("synced_at") else None,
+                ))
+                pairs_map[nid].match_type = "direct"
+
+        pairs = list(pairs_map.values())
+        matched   = sum(1 for p in pairs if p.match_type == "direct")
+        unmatched = sum(1 for p in pairs if p.match_type == "none")
+
+        return ObsidianNotePdfPairsResponse(
+            count=len(pairs),
+            matched=matched,
+            unmatched=unmatched,
+            province=province or None,
+            pairs=pairs,
+        )
+    except Exception as exc:
+        logger.exception("[obsidian] pdf pairs error: %s", exc)
         raise HTTPException(status_code=500, detail={"error": str(exc)})

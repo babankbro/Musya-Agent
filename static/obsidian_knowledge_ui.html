@@ -35,6 +35,9 @@
         .type-district { background: #f3f4f6; color: #374151; }
         .type-policy { background: #ede9fe; color: #5b21b6; }
         .type-research { background: #fce7f3; color: #831843; }
+        .pdf-badge { background: #dbeafe; color: #1d4ed8; padding: 1px 5px; border-radius: 9999px; font-size: 0.65rem; font-weight: 700; vertical-align: middle; }
+        .province-tree-item { border-left: 2px solid #d1fae5; transition: all 0.15s; }
+        .province-tree-item:hover { border-left-color: #10b981; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -148,6 +151,14 @@
                         <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
                     </div>
                     <div class="p-4 overflow-y-auto flex-1 prose max-w-none" id="modal-content"></div>
+                    <div id="modal-pdfs" class="hidden border-t bg-gray-50 rounded-b-xl">
+                        <div class="px-4 py-2 flex items-center gap-2 cursor-pointer select-none" onclick="togglePdfPanel()">
+                            <span class="text-sm font-semibold text-gray-700">📎 เอกสารต้นฉบับ</span>
+                            <span id="modal-pdfs-count" class="text-xs text-gray-400"></span>
+                            <span id="modal-pdfs-chevron" class="ml-auto text-gray-400 text-xs">▼</span>
+                        </div>
+                        <div id="modal-pdfs-list" class="px-4 pb-3 space-y-1 max-h-40 overflow-y-auto"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -225,9 +236,21 @@
                 <div id="idx-result" class="hidden mt-4"></div>
             </div>
 
+            <!-- Sync PDFs section -->
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-bold text-gray-800 mb-2">📄 Sync PDFs to MinIO</h2>
+                <p class="text-sm text-gray-500 mb-4">อัพโหลดไฟล์ PDF/DOCX ต้นฉบับทั้งหมดไปยัง MinIO (idempotent — ข้ามไฟล์ที่อัพโหลดแล้ว)</p>
+                <div class="flex gap-3 items-center">
+                    <button onclick="doSyncPdfs()" id="sync-pdf-btn" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50">
+                        🔄 Sync PDFs to MinIO
+                    </button>
+                </div>
+                <div id="sync-pdf-result" class="hidden mt-4"></div>
+            </div>
+
             <!-- Browse notes section -->
             <div class="bg-white rounded-xl shadow-sm border p-6">
-                <h2 class="text-lg font-bold text-gray-800 mb-4">📂 Browse Notes</h2>
+                <h2 class="text-lg font-bold text-gray-800 mb-4">📂 Vault Browser</h2>
                 <div class="flex flex-wrap gap-3 mb-4">
                     <select id="br-province" class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" onchange="doBrowse()">
                         <option value="">ทุกจังหวัด</option>
@@ -251,6 +274,28 @@
                 </div>
                 <div id="browse-results"></div>
             </div>
+
+            <!-- Note ↔ PDF pairing table -->
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-bold text-gray-800 mb-1">📎 จับคู่ Note ↔ PDF (MinIO)</h2>
+                <p class="text-sm text-gray-500 mb-4">แสดงความสัมพันธ์ระหว่างไฟล์ .md ใน Vault กับเอกสาร PDF ต้นฉบับใน MinIO</p>
+                <div class="flex flex-wrap gap-3 mb-4 items-center">
+                    <select id="pair-province" class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <option value="">เลือกจังหวัด</option>
+                        <option>อุบลราชธานี</option>
+                        <option>ศรีสะเกษ</option>
+                        <option>ยโสธร</option>
+                        <option>อำนาจเจริญ</option>
+                        <option>มุกดาหาร</option>
+                    </select>
+                    <button onclick="loadNotePdfPairs()" id="pair-btn"
+                        class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                        📋 โหลดตาราง
+                    </button>
+                    <span id="pair-summary" class="text-xs text-gray-400"></span>
+                </div>
+                <div id="pair-results"></div>
+            </div>
         </div>
 
     </main>
@@ -259,6 +304,8 @@
 const API = 'http://localhost:8000';
 let currentTab = 'search';
 let askEventSource = null;
+let provincesWithPdfs = new Set();   // 6e: provinces that have PDF assets
+let pdfPanelOpen = true;
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(tab) {
@@ -346,10 +393,12 @@ function renderSearchResults(d, query) {
 function renderNoteCard(n) {
     const tags = (n.tags || []).map(t => `<span class="tag-chip">${t}</span>`).join(' ');
     const typeCls = `type-${n.note_type || 'district'}`;
+    const pdfBadge = (n.province && provincesWithPdfs.has(n.province))
+        ? '<span class="pdf-badge">📄 PDF</span>' : '';
     return `
         <div class="note-card bg-white rounded-xl border p-5 cursor-pointer fade-in" onclick="openNote('${n.note_id.replace(/'/g,"\\'")}', '${(n.title||'').replace(/'/g,"\\'")}')">
             <div class="flex items-start justify-between gap-3 mb-2">
-                <h4 class="font-semibold text-gray-800 text-sm leading-snug flex-1">${n.title || n.note_id}</h4>
+                <h4 class="font-semibold text-gray-800 text-sm leading-snug flex-1">${n.title || n.note_id} ${pdfBadge}</h4>
                 <span class="type-badge ${typeCls} shrink-0">${n.note_type || '-'}</span>
             </div>
             <div class="flex flex-wrap gap-1.5 mb-2">
@@ -367,11 +416,20 @@ function renderNoteCard(n) {
 async function openNote(noteId, title) {
     document.getElementById('modal-title').textContent = title || noteId;
     document.getElementById('modal-content').innerHTML = '<div class="text-gray-400 text-sm py-8 text-center">กำลังโหลด...</div>';
+    document.getElementById('modal-pdfs').classList.add('hidden');
     document.getElementById('note-modal').classList.remove('hidden');
+    pdfPanelOpen = true;
+    document.getElementById('modal-pdfs-chevron').textContent = '▼';
 
+    // Load note content and PDFs in parallel
+    const [noteRes, pdfRes] = await Promise.allSettled([
+        fetch(`${API}/api/obsidian/notes/${encodeURIComponent(noteId)}`),
+        fetch(`${API}/api/obsidian/pdfs/note/${encodeURIComponent(noteId)}`),
+    ]);
+
+    // Render note content
     try {
-        const r = await fetch(`${API}/api/obsidian/notes/${encodeURIComponent(noteId)}`);
-        const d = await r.json();
+        const d = await noteRes.value.json();
         if (d.error) {
             document.getElementById('modal-content').innerHTML = `<div class="text-red-600">${d.error}</div>`;
         } else {
@@ -380,6 +438,37 @@ async function openNote(noteId, title) {
     } catch (e) {
         document.getElementById('modal-content').innerHTML = `<div class="text-red-600">${e.message}</div>`;
     }
+
+    // Render PDF panel
+    try {
+        const pd = await pdfRes.value.json();
+        if (pd.assets && pd.assets.length > 0) {
+            renderNotePdfs(pd.assets);
+            document.getElementById('modal-pdfs').classList.remove('hidden');
+        }
+    } catch (_) { /* no PDFs or endpoint not ready yet */ }
+}
+
+function togglePdfPanel() {
+    pdfPanelOpen = !pdfPanelOpen;
+    document.getElementById('modal-pdfs-list').style.display = pdfPanelOpen ? '' : 'none';
+    document.getElementById('modal-pdfs-chevron').textContent = pdfPanelOpen ? '▼' : '▶';
+}
+
+function renderNotePdfs(assets) {
+    document.getElementById('modal-pdfs-count').textContent = `(${assets.length} ไฟล์)`;
+    const items = assets.map(a => {
+        const icon = a.content_type === 'application/pdf' ? '📄' : '📎';
+        const sizeKb = a.file_size ? ` · ${Math.round(a.file_size / 1024)} KB` : '';
+        return `
+            <div class="flex items-center gap-2 py-1 text-sm province-tree-item pl-2">
+                <span class="text-base">${icon}</span>
+                <span class="flex-1 text-gray-700 truncate text-xs" title="${a.filename}">${a.filename}${sizeKb}</span>
+                <a href="${a.minio_url}" download="${a.filename}" class="text-xs text-blue-600 hover:underline px-1">📥</a>
+                <a href="${a.minio_url}" target="_blank" rel="noopener" class="text-xs text-emerald-600 hover:underline px-1">👁</a>
+            </div>`;
+    }).join('');
+    document.getElementById('modal-pdfs-list').innerHTML = items;
 }
 
 function closeModal() {
@@ -511,32 +600,66 @@ function handleSSEEvent(evt) {
     }
 }
 
-function renderAskResult(d) {
-    const refs = (d.notes_referenced || []).map(n =>
-        `<li class="text-xs"><span class="font-medium text-gray-700">${n.title || n.note_id}</span>${n.province ? ` <span class="text-gray-400">(${n.province}${n.district ? ' / ' + n.district : ''})</span>` : ''}</li>`
+async function renderAskResult(d) {
+    const notes = d.notes_referenced || [];
+    const meta  = d.metadata || {};
+
+    // ── [sync] Build note ref rows — each gets an empty PDF slot ─────────────
+    const spinnerSvg = `<svg class="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg>`;
+
+    const refs = notes.map((n, i) => `
+        <li class="py-2.5 border-b border-blue-100 last:border-0">
+            <div class="flex items-center gap-1.5 flex-wrap mb-1">
+                <button onclick="openNote('${n.note_id.replace(/'/g,"\\'")}','${(n.title||'').replace(/'/g,"\\'")}' )"
+                    class="font-medium text-xs text-gray-800 hover:text-indigo-700 hover:underline text-left leading-snug">
+                    ${n.title || n.note_id}
+                </button>
+                ${n.province ? `<span class="text-xs text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded-full">${n.province}${n.district ? ' / ' + n.district : ''}</span>` : ''}
+            </div>
+            <div id="ref-pdfs-${i}" class="flex flex-wrap gap-1 min-h-[20px]">
+                ${n.province
+                    ? `<span class="inline-flex items-center gap-1 text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">${spinnerSvg}โหลดเอกสาร...</span>`
+                    : '<span class="text-xs text-gray-300">—</span>'}
+            </div>
+        </li>`
     ).join('');
 
     const followUps = (d.follow_ups || []).map(q =>
-        `<button onclick="setQuestion('${q.replace(/'/g, "\\'")}'); switchTab('ask')" class="text-xs bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full hover:bg-emerald-100 transition-colors text-left">${q}</button>`
+        `<button onclick="setQuestion('${q.replace(/'/g, "\\'")}'); switchTab('ask')"
+            class="text-xs bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full hover:bg-emerald-100 transition-colors text-left">${q}</button>`
     ).join('');
 
-    const meta = d.metadata || {};
-
+    // ── [sync] Render full HTML immediately ───────────────────────────────────
     const html = `
         <div class="bg-white rounded-xl border shadow-sm fade-in">
-            <div class="p-5 border-b">
-                <div class="flex items-center justify-between mb-1">
-                    <span class="text-xs text-gray-500">ใช้เวลา ${meta.elapsed_seconds || '?'} วินาที · อ้างอิง ${meta.notes_found || 0} notes</span>
-                </div>
+
+            <!-- Meta bar -->
+            <div class="px-5 py-3 border-b flex items-center gap-2 flex-wrap">
+                <span class="text-xs text-gray-400">⏱ ${meta.elapsed_seconds || '?'} วินาที</span>
+                <span class="text-gray-300 text-xs">·</span>
+                <span class="text-xs text-gray-400">📋 อ้างอิง ${meta.notes_found || notes.length} notes</span>
             </div>
+
+            <!-- [sync] Markdown answer -->
             <div class="p-5 prose max-w-none">
                 ${marked.parse(d.content || '')}
             </div>
-            ${refs ? `
-            <div class="p-5 border-t bg-gray-50 rounded-b-xl">
-                <p class="text-xs font-semibold text-gray-600 mb-2">📄 Notes ที่อ้างอิง:</p>
-                <ul class="space-y-1">${refs}</ul>
+
+            ${notes.length ? `
+            <!-- [sync] Sources panel — blue, loading state until async fills it -->
+            <div class="mx-4 mb-5 rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
+                <div class="px-4 py-2.5 border-b border-blue-200 flex items-center gap-2 flex-wrap">
+                    <span class="text-sm font-semibold text-blue-800">📂 เอกสารต้นฉบับ PDF</span>
+                    <span id="ask-pdf-status" class="inline-flex items-center gap-1 text-xs text-blue-500">
+                        ${spinnerSvg}กำลังโหลดเอกสารต้นฉบับ...
+                    </span>
+                </div>
+                <ul class="divide-y divide-blue-100 px-4 py-1">${refs}</ul>
             </div>` : ''}
+
             ${followUps ? `
             <div class="p-5 border-t">
                 <p class="text-xs font-semibold text-gray-600 mb-2">💡 คำถามติดตาม:</p>
@@ -546,6 +669,142 @@ function renderAskResult(d) {
     `;
     document.getElementById('ask-result').innerHTML = html;
     document.getElementById('ask-result').classList.remove('hidden');
+
+    // ── [async] Fetch /pdfs/pairs per province — same backend join as จับคู่ tab ─
+    const provinces = [...new Set(notes.map(n => n.province).filter(Boolean))];
+    const statusEl  = document.getElementById('ask-pdf-status');
+
+    if (provinces.length === 0) {
+        notes.forEach((_, i) => {
+            const el = document.getElementById(`ref-pdfs-${i}`);
+            if (el) el.innerHTML = '<span class="text-xs text-gray-300">—</span>';
+        });
+        if (statusEl) statusEl.remove();
+        return;
+    }
+
+    try {
+        // Fetch pairs for each unique province in parallel (same endpoint as จับคู่ tab)
+        const results = await Promise.allSettled(
+            provinces.map(p =>
+                fetch(`${API}/api/obsidian/pdfs/pairs?province=${encodeURIComponent(p)}&vault_id=health_region_10`)
+                    .then(r => r.json())
+            )
+        );
+
+        // Build note_id → pair lookup from all province results
+        const pairMap = {};
+        results.forEach(res => {
+            if (res.status === 'fulfilled' && Array.isArray(res.value.pairs)) {
+                res.value.pairs.forEach(pair => { pairMap[pair.note_id] = pair; });
+            }
+        });
+
+        // Chip renderer — identical to จับคู่ tab
+        const makePdfChip = (a) => {
+            const icon = (a.content_type || '').includes('pdf') ? '📄' : '📎';
+            return `<a href="${a.minio_url}" target="_blank" rel="noopener"
+                title="${a.filename}"
+                class="inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full border
+                       text-emerald-700 bg-white border-emerald-300
+                       hover:bg-emerald-50 hover:border-emerald-500 transition-colors max-w-[220px] group">
+                <span class="shrink-0">${icon}</span>
+                <span class="truncate">${a.filename}</span>
+                <span class="shrink-0 text-[10px] opacity-40 group-hover:opacity-80 ml-0.5">↗</span>
+            </a>`;
+        };
+
+        let totalDirect = 0;
+
+        notes.forEach((n, i) => {
+            const el = document.getElementById(`ref-pdfs-${i}`);
+            if (!el) return;
+
+            el.className = 'flex flex-wrap gap-1 mt-0.5';
+
+            const pair = pairMap[n.note_id];
+
+            if (!pair) {
+                // Note not found in pairs response (rare — different vault/province)
+                el.innerHTML = '<span class="text-xs text-gray-300">—</span>';
+                return;
+            }
+
+            const direct = pair.direct_pdfs || [];
+            totalDirect += direct.length;
+
+            if (direct.length > 0) {
+                // ✅ Direct FK match — same as ✅ row in จับคู่ tab
+                const SHOW = 4;
+                const vis  = direct.slice(0, SHOW);
+                const rest = direct.slice(SHOW);
+                const mId  = `ref-more-${i}`;
+                const more = rest.length ? `
+                    <button onclick="toggleInlinePdfs('${mId}',this)"
+                        class="text-xs text-emerald-600 hover:text-emerald-800 underline decoration-dotted px-1">
+                        +${rest.length} ไฟล์
+                    </button>
+                    <span id="${mId}" style="display:none" class="contents">
+                        ${rest.map(makePdfChip).join('')}
+                    </span>` : '';
+                el.innerHTML = vis.map(makePdfChip).join('') + more;
+
+            } else if (pair.source_file) {
+                // ⚠️ Has source_file but not found in MinIO — same as ⚠️ row in จับคู่ tab
+                const basename = pair.source_file.split('/').pop().split('\\').pop();
+                el.innerHTML = `<span class="inline-flex items-center gap-1 text-xs text-amber-600 bg-amber-50
+                    border border-amber-200 px-2 py-0.5 rounded-full"
+                    title="ไม่พบใน MinIO: ${pair.source_file}">
+                    ⚠️ ไม่พบ: ${basename}
+                </span>`;
+
+            } else {
+                // — No source_file linked
+                el.innerHTML = '<span class="text-xs text-gray-300">—</span>';
+            }
+        });
+
+        // ── Update status badge ───────────────────────────────────────────────
+        if (statusEl) {
+            const warnCount = notes.filter(n => {
+                const p = pairMap[n.note_id];
+                return p && p.match_type !== 'direct' && p.source_file;
+            }).length;
+
+            if (totalDirect > 0) {
+                statusEl.className = 'inline-flex items-center gap-1 text-xs text-emerald-600 font-medium';
+                statusEl.innerHTML = `✅ พบ ${totalDirect} ไฟล์ต้นฉบับ`
+                    + (warnCount ? ` <span class="text-amber-500 font-normal">· ⚠️ ${warnCount} ไม่พบใน MinIO</span>` : '');
+            } else if (warnCount > 0) {
+                statusEl.className = 'inline-flex items-center gap-1 text-xs text-amber-500';
+                statusEl.innerHTML = `⚠️ ${warnCount} ไฟล์ยังไม่ได้ sync ขึ้น MinIO`;
+            } else {
+                statusEl.className = 'inline-flex items-center gap-1 text-xs text-gray-400';
+                statusEl.innerHTML = 'ไม่พบเอกสารต้นฉบับ';
+            }
+        }
+
+    } catch (e) {
+        notes.forEach((_, i) => {
+            const el = document.getElementById(`ref-pdfs-${i}`);
+            if (el) el.innerHTML = '<span class="text-xs text-gray-300">—</span>';
+        });
+        if (statusEl) {
+            statusEl.className = 'text-xs text-red-400';
+            statusEl.innerHTML = 'โหลดไม่ได้';
+        }
+        console.warn('[ask] PDF refs error:', e);
+    }
+}
+
+function toggleInlinePdfs(spanId, btn) {
+    const el = document.getElementById(spanId);
+    if (!el) return;
+    const showing = el.style.display !== 'none';
+    el.style.display = showing ? 'none' : 'contents';
+    btn.textContent = showing
+        ? `+${el.querySelectorAll('a').length} ไฟล์`
+        : 'ซ่อน';
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -554,8 +813,22 @@ async function loadStatus() {
     container.innerHTML = '<div class="text-center text-gray-500 py-12">กำลังโหลด...</div>';
 
     try {
-        const r = await fetch(`${API}/api/obsidian/status`);
-        const d = await r.json();
+        const [statusRes, pdfRes] = await Promise.allSettled([
+            fetch(`${API}/api/obsidian/status`),
+            fetch(`${API}/api/obsidian/pdfs`),
+        ]);
+
+        const d = await statusRes.value.json();
+        let pdfCount = 0;
+        let pdfLastSync = null;
+        try {
+            const pd = await pdfRes.value.json();
+            pdfCount = pd.count || 0;
+            if (pd.assets && pd.assets.length > 0) {
+                const dates = pd.assets.map(a => a.synced_at).filter(Boolean).sort();
+                if (dates.length) pdfLastSync = new Date(dates[dates.length - 1]).toLocaleString('th-TH');
+            }
+        } catch (_) {}
 
         const vaultsHtml = (d.vaults || []).map(v => `
             <div class="bg-white rounded-xl border p-5">
@@ -579,7 +852,7 @@ async function loadStatus() {
         `).join('');
 
         container.innerHTML = `
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <div class="bg-white rounded-xl border p-5 text-center">
                     <div class="text-4xl font-bold text-emerald-600 mb-1">${d.total_notes}</div>
                     <div class="text-sm text-gray-500">Notes ทั้งหมด</div>
@@ -587,6 +860,11 @@ async function loadStatus() {
                 <div class="bg-white rounded-xl border p-5 text-center">
                     <div class="text-4xl font-bold text-teal-600 mb-1">${(d.vaults || []).length}</div>
                     <div class="text-sm text-gray-500">Vaults</div>
+                </div>
+                <div class="bg-white rounded-xl border p-5 text-center">
+                    <div class="text-2xl font-bold text-blue-600 mb-1">📄 ${pdfCount}</div>
+                    <div class="text-sm text-gray-500">PDF Assets</div>
+                    ${pdfLastSync ? `<div class="text-xs text-gray-400 mt-1">Sync: ${pdfLastSync}</div>` : ''}
                 </div>
                 <div class="bg-white rounded-xl border p-5 text-center">
                     <div class="text-2xl font-bold mb-1 ${d.enabled ? 'text-green-600' : 'text-red-500'}">${d.enabled ? '✅ Active' : '❌ Disabled'}</div>
@@ -642,6 +920,44 @@ async function doIndex() {
     }
 }
 
+// ── Manage: Sync PDFs ─────────────────────────────────────────────────────────
+async function doSyncPdfs() {
+    const btn = document.getElementById('sync-pdf-btn');
+    const result = document.getElementById('sync-pdf-result');
+
+    if (!confirm('เริ่ม Sync PDFs ไปยัง MinIO? อาจใช้เวลาหลายนาทีสำหรับไฟล์ที่ยังไม่ได้อัพโหลด')) return;
+
+    btn.disabled = true;
+    btn.textContent = '⏳ กำลัง Sync...';
+    result.innerHTML = '<div class="text-gray-500 text-sm">กำลังอัพโหลด...</div>';
+    result.classList.remove('hidden');
+
+    try {
+        const r = await fetch(`${API}/api/obsidian/pdfs/sync`, { method: 'POST' });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+
+        result.innerHTML = `
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+                <p class="font-semibold text-blue-800 mb-2">✅ Sync เสร็จสมบูรณ์</p>
+                <div class="grid grid-cols-4 gap-3 text-center">
+                    <div><div class="font-bold text-blue-700 text-lg">${d.uploaded}</div><div class="text-xs text-gray-500">อัพโหลดใหม่</div></div>
+                    <div><div class="font-bold text-gray-600 text-lg">${d.skipped}</div><div class="text-xs text-gray-500">ข้ามแล้ว</div></div>
+                    <div><div class="font-bold text-red-600 text-lg">${d.errors}</div><div class="text-xs text-gray-500">ข้อผิดพลาด</div></div>
+                    <div><div class="font-bold text-teal-700 text-lg">${d.total_files}</div><div class="text-xs text-gray-500">ไฟล์ทั้งหมด</div></div>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">ใช้เวลา: ${d.elapsed_seconds}s</p>
+            </div>
+        `;
+        loadPdfProvinces();  // refresh badge set
+    } catch (e) {
+        result.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">เกิดข้อผิดพลาด: ${e.message}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 Sync PDFs to MinIO';
+    }
+}
+
 // ── Manage: Browse ────────────────────────────────────────────────────────────
 async function doBrowse() {
     const province = document.getElementById('br-province').value;
@@ -665,38 +981,59 @@ async function doBrowse() {
             return;
         }
 
-        const rows = d.notes.map(n => `
-            <tr class="hover:bg-gray-50 cursor-pointer" onclick="openNote('${n.note_id.replace(/'/g,"\\'")}', '${(n.title||'').replace(/'/g,"\\'")}')">
-                <td class="px-3 py-2 text-sm font-medium text-gray-800 max-w-xs truncate">${n.title || n.note_id}</td>
-                <td class="px-3 py-2 text-sm text-gray-600">${n.province || '-'}</td>
-                <td class="px-3 py-2 text-sm text-gray-500">${n.district || '-'}</td>
-                <td class="px-3 py-2"><span class="type-badge type-${n.note_type || 'district'}">${n.note_type || '-'}</span></td>
-                <td class="px-3 py-2 text-xs text-gray-400">${n.year ? n.year + 543 : '-'}</td>
-                <td class="px-3 py-2 text-xs text-gray-400 max-w-xs truncate">${(n.tags || []).join(', ')}</td>
-            </tr>
-        `).join('');
+        // Group notes by province
+        const byProvince = {};
+        for (const n of d.notes) {
+            const prov = n.province || '(ไม่ระบุจังหวัด)';
+            if (!byProvince[prov]) byProvince[prov] = [];
+            byProvince[prov].push(n);
+        }
+
+        const treeHtml = Object.entries(byProvince).sort(([a],[b]) => a.localeCompare(b, 'th')).map(([prov, notes]) => {
+            const hasPdf = provincesWithPdfs.has(prov);
+            const pdfTag = hasPdf ? '<span class="pdf-badge ml-1">📄 PDF</span>' : '';
+            const noteItems = notes.map(n => {
+                const typeCls = `type-${n.note_type || 'district'}`;
+                return `
+                    <div class="flex items-center gap-2 py-1 pl-4 hover:bg-emerald-50 cursor-pointer rounded province-tree-item"
+                         onclick="openNote('${n.note_id.replace(/'/g,"\\'")}', '${(n.title||'').replace(/'/g,"\\'")}')">
+                        <span class="text-xs text-gray-400">📄</span>
+                        <span class="text-sm text-gray-700 flex-1 truncate">${n.title || n.note_id}</span>
+                        <span class="type-badge ${typeCls} shrink-0">${n.note_type || '-'}</span>
+                        ${n.year ? `<span class="text-xs text-gray-400 shrink-0">${n.year + 543}</span>` : ''}
+                    </div>`;
+            }).join('');
+            const groupId = `prov-${prov.replace(/\s/g,'-')}`;
+            return `
+                <div class="mb-2">
+                    <div class="flex items-center gap-2 py-2 px-3 bg-emerald-50 rounded-lg cursor-pointer hover:bg-emerald-100"
+                         onclick="toggleProvince('${groupId}')">
+                        <span class="text-base">📂</span>
+                        <span class="font-semibold text-emerald-800 text-sm">${prov}</span>
+                        ${pdfTag}
+                        <span class="text-xs text-gray-400 ml-1">(${notes.length} notes)</span>
+                        <span id="${groupId}-chevron" class="ml-auto text-gray-400 text-xs">▼</span>
+                    </div>
+                    <div id="${groupId}" class="mt-1 space-y-0.5">${noteItems}</div>
+                </div>`;
+        }).join('');
 
         container.innerHTML = `
-            <p class="text-xs text-gray-500 mb-2">พบ ${d.count} notes</p>
-            <div class="overflow-x-auto rounded-lg border">
-                <table class="min-w-full text-sm">
-                    <thead class="bg-gray-50 text-xs text-gray-600 font-semibold">
-                        <tr>
-                            <th class="px-3 py-2 text-left">ชื่อ Note</th>
-                            <th class="px-3 py-2 text-left">จังหวัด</th>
-                            <th class="px-3 py-2 text-left">อำเภอ</th>
-                            <th class="px-3 py-2 text-left">ประเภท</th>
-                            <th class="px-3 py-2 text-left">ปี</th>
-                            <th class="px-3 py-2 text-left">Tags</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-100">${rows}</tbody>
-                </table>
-            </div>
+            <p class="text-xs text-gray-500 mb-3">พบ ${d.count} notes ใน ${Object.keys(byProvince).length} จังหวัด</p>
+            <div class="space-y-1">${treeHtml}</div>
         `;
     } catch (e) {
         container.innerHTML = `<div class="text-red-600 text-sm">เกิดข้อผิดพลาด: ${e.message}</div>`;
     }
+}
+
+function toggleProvince(groupId) {
+    const el = document.getElementById(groupId);
+    const chevron = document.getElementById(groupId + '-chevron');
+    if (!el) return;
+    const hidden = el.style.display === 'none';
+    el.style.display = hidden ? '' : 'none';
+    if (chevron) chevron.textContent = hidden ? '▼' : '▶';
 }
 
 // ── Keyboard ──────────────────────────────────────────────────────────────────
@@ -705,8 +1042,159 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Enter' && e.target.id === 's-query') doSearch();
 });
 
+// ── Manage: Note ↔ PDF pairing table ─────────────────────────────────────────
+async function loadNotePdfPairs() {
+    const province  = document.getElementById('pair-province').value;
+    const btn       = document.getElementById('pair-btn');
+    const summary   = document.getElementById('pair-summary');
+    const container = document.getElementById('pair-results');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ กำลังโหลด...';
+    summary.textContent = '';
+    container.innerHTML = '<div class="text-gray-400 text-sm py-6 text-center">กำลังดึงข้อมูล...</div>';
+
+    try {
+        const params = new URLSearchParams({ vault_id: 'health_region_10' });
+        if (province) params.set('province', province);
+
+        const d = await fetch(`${API}/api/obsidian/pdfs/pairs?${params}`).then(r => r.json());
+        if (d.error) throw new Error(d.error);
+
+        const pairs = d.pairs || [];
+        if (pairs.length === 0) {
+            container.innerHTML = '<div class="text-gray-400 text-sm py-6 text-center">ไม่พบข้อมูลตามเงื่อนไข</div>';
+            return;
+        }
+
+        const pct = d.count ? Math.round(d.matched / d.count * 100) : 0;
+        summary.innerHTML = `
+            <span class="text-emerald-700 font-medium">✅ ${d.matched} linked</span>
+            <span class="text-gray-400 mx-1">·</span>
+            <span class="text-gray-500">⬜ ${d.unmatched} no PDF</span>
+            <span class="text-gray-400 mx-1">·</span>
+            <span class="text-gray-500">${d.count} notes · ${pct}% coverage</span>`;
+
+        const makePdfChip = (a) => {
+            const icon = (a.content_type || '').includes('pdf') ? '📄' : '📎';
+            return `<a href="${a.minio_url}" target="_blank" rel="noopener"
+                title="${a.filename}"
+                class="inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full border
+                       text-emerald-700 bg-white border-emerald-300
+                       hover:bg-emerald-50 hover:border-emerald-500 transition-colors max-w-56 group">
+                <span class="shrink-0">${icon}</span>
+                <span class="truncate">${a.filename}</span>
+                <span class="shrink-0 text-emerald-400 group-hover:text-emerald-600 ml-0.5">↗</span>
+            </a>`;
+        };
+
+        const rows = pairs.map(p => {
+            const safeId    = p.note_id.replace(/[^a-zA-Z0-9]/g, '_');
+            const moreId    = `pm-${safeId}`;
+            const typeCls   = `type-${p.note_type || 'district'}`;
+            const SHOW      = 4;
+            const visible   = (p.direct_pdfs || []).slice(0, SHOW);
+            const rest      = (p.direct_pdfs || []).slice(SHOW);
+
+            let pdfCell = '';
+            if (p.match_type === 'direct') {
+                const chips   = visible.map(makePdfChip).join('');
+                const moreBtn = rest.length ? `
+                    <button onclick="togglePairMore('${moreId}',this)"
+                        class="text-xs text-indigo-500 hover:text-indigo-700 underline decoration-dotted">
+                        +${rest.length} อีก
+                    </button>
+                    <span id="${moreId}" style="display:none" class="contents">
+                        ${rest.map(makePdfChip).join('')}
+                    </span>` : '';
+                pdfCell = `<div class="flex flex-wrap gap-1 items-center">${chips}${moreBtn}</div>`;
+            } else if (p.source_file) {
+                // Has source_file but no FK match — show the raw name as clue
+                pdfCell = `<span class="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full" title="ไม่พบใน MinIO: ${p.source_file}">
+                    ⚠️ ไม่พบ: ${p.source_file.split('/').pop().split('\\').pop()}
+                </span>`;
+            } else {
+                pdfCell = '<span class="text-xs text-gray-300">—</span>';
+            }
+
+            const matchBadge = p.match_type === 'direct'
+                ? `<span class="ml-1 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-1 rounded" title="ลิงก์ตรงจาก source_file">✅</span>`
+                : '';
+
+            return `
+                <tr class="border-b border-gray-100 hover:bg-slate-50 align-top">
+                    <td class="px-3 py-2 w-64">
+                        <button onclick="openNote('${p.note_id.replace(/'/g,"\\'")}','${(p.title||'').replace(/'/g,"\\'")}' )"
+                            class="text-left text-xs font-medium text-gray-800 hover:text-indigo-700 hover:underline leading-snug">
+                            ${p.title || p.note_id}${matchBadge}
+                        </button>
+                        ${p.source_file ? `<div class="text-xs text-gray-400 truncate max-w-60 mt-0.5" title="${p.source_file}">📄 ${p.source_file.split('/').pop().split('\\').pop()}</div>` : ''}
+                    </td>
+                    <td class="px-3 py-2 whitespace-nowrap">
+                        <span class="text-xs text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded-full">${p.province || '—'}</span>
+                    </td>
+                    <td class="px-3 py-2 whitespace-nowrap">
+                        <span class="type-badge ${typeCls}">${p.note_type || '—'}</span>
+                    </td>
+                    <td class="px-3 py-2">${pdfCell}</td>
+                </tr>`;
+        }).join('');
+
+        // Stats bar
+        const directCount = d.matched;
+        const warnCount   = pairs.filter(p => p.match_type === 'none' && p.source_file).length;
+        const noneCount   = pairs.filter(p => p.match_type === 'none' && !p.source_file).length;
+
+        container.innerHTML = `
+            <div class="flex gap-4 text-xs mb-3 p-3 bg-slate-50 rounded-lg border">
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"></span> ✅ ลิงก์ตรง: <strong>${directCount}</strong></span>
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span> ⚠️ source_file ไม่พบใน MinIO: <strong>${warnCount}</strong></span>
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-gray-300 inline-block"></span> — ไม่มี source_file: <strong>${noneCount}</strong></span>
+            </div>
+            <div class="overflow-x-auto rounded-lg border border-gray-200 max-h-[65vh] overflow-y-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50 border-b text-xs text-gray-600 font-semibold sticky top-0 z-10">
+                        <tr>
+                            <th class="px-3 py-2 text-left w-64">ชื่อ Note (.md)</th>
+                            <th class="px-3 py-2 text-left w-28">จังหวัด</th>
+                            <th class="px-3 py-2 text-left w-20">ประเภท</th>
+                            <th class="px-3 py-2 text-left">เอกสารต้นฉบับ PDF ใน MinIO ↗</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-50">${rows}</tbody>
+                </table>
+            </div>`;
+
+    } catch (e) {
+        container.innerHTML = `<div class="text-red-600 bg-red-50 rounded-lg p-4 text-sm">เกิดข้อผิดพลาด: ${e.message}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '📋 โหลดตาราง';
+    }
+}
+
+function togglePairMore(spanId, btn) {
+    const el = document.getElementById(spanId);
+    if (!el) return;
+    const showing = el.style.display !== 'none';
+    el.style.display = showing ? 'none' : 'contents';
+    btn.textContent = showing
+        ? `+${el.querySelectorAll('a').length} อีก`
+        : 'ซ่อน';
+}
+
+// ── PDF province set (for 6e badges) ─────────────────────────────────────────
+async function loadPdfProvinces() {
+    try {
+        const r = await fetch(`${API}/api/obsidian/pdfs`);
+        const d = await r.json();
+        provincesWithPdfs = new Set((d.assets || []).map(a => a.province).filter(Boolean));
+    } catch (_) {}
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 checkHealth();
+loadPdfProvinces();
 </script>
 </body>
 </html>

@@ -22,8 +22,10 @@ class ObsidianNoteResult(BaseModel):
     tags: list[str] = []
     source_file: str | None
     year: int | None
-    snippet: str            # first ~600 chars of content_stripped
-    score: float = 0.0      # trigram similarity score
+    snippet: str                        # matched section text (~600 chars)
+    matched_section: str | None = None  # ## header where match was found
+    score: float = 0.0                  # pg_trgm similarity score (0–1)
+    is_graph_neighbor: bool = False     # True = surfaced via wikilink expansion
 
 
 class ObsidianSearchResponse(BaseModel):
@@ -31,6 +33,7 @@ class ObsidianSearchResponse(BaseModel):
     results: list[ObsidianNoteResult]
     query: str
     vault_id: str
+    tier: str = "unknown"   # "chunk+graph" | "full_note_fallback"
     error: str | None = None
 
 
@@ -81,6 +84,8 @@ class ObsidianIndexResult(BaseModel):
     unchanged: int
     errors: int
     total_files: int
+    chunks_written: int = 0
+    links_written: int = 0
     elapsed_seconds: float
 
 
@@ -93,3 +98,50 @@ class ObsidianNoteListItem(BaseModel):
     tags: list[str] = []
     year: int | None
     source_file: str | None
+
+
+class ObsidianPdfAsset(BaseModel):
+    id: int
+    province: str
+    note_id: str | None
+    filename: str
+    minio_path: str
+    minio_url: str
+    file_size: int | None
+    content_type: str
+    synced_at: str | None
+
+
+class ObsidianPdfSyncResult(BaseModel):
+    uploaded: int
+    skipped: int
+    errors: int
+    total_files: int
+    elapsed_seconds: float
+
+
+class ObsidianPdfListResponse(BaseModel):
+    count: int
+    province: str | None
+    assets: list[ObsidianPdfAsset]
+
+
+class ObsidianNotePdfPair(BaseModel):
+    note_id: str
+    title: str | None
+    province: str | None
+    district: str | None
+    note_type: str | None
+    tags: list[str] = []
+    year: int | None
+    source_file: str | None
+    direct_pdfs: list[ObsidianPdfAsset] = []   # via note_id FK (exact match)
+    match_type: str = "none"                    # "direct" | "none"
+
+
+class ObsidianNotePdfPairsResponse(BaseModel):
+    count: int
+    matched: int        # notes that have ≥1 direct PDF
+    unmatched: int      # notes with source_file but no PDF link
+    province: str | None
+    pairs: list[ObsidianNotePdfPair]

@@ -64,3 +64,7 @@ source: PDF/อำนาจเจริญ/รอบที่ 2 ปี 65.pdf
 
 ---
 ** Long-term Action:** เร่งรัดการจัดการสิ่งปฏิกูลเพื่อตัดวงจรพยาธิใบไม้ตับ และปรับปรุงระบบการจัดการการเงินการคลังในโรงพยาบาลที่มี Risk Score สูง [[อำนาจเจริญ]]
+
+
+## 🔗 Related Topics
+[[pdf]] [[ingest]] [[Amnat_Charoen]] [[Health_Audit]] [[2565]] [[Negative_Growth]]

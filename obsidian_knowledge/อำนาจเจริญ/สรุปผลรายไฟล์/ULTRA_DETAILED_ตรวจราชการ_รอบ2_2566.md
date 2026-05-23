@@ -63,3 +63,7 @@ source: PDF/อำนาจเจริญ/รอบที่ 2 ปี 66.pdf
 
 ---
 **Longitudinal Trend:** จังหวัดอำนาจเจริญก้าวสู่ยุค Digital Health อย่างเต็มตัว พร้อมทั้งขยายผลการใช้กัญชาทางการแพทย์ในกลุ่ม Palliative Care ได้อย่างมีนัยสำคัญ แต่ยังต้องเฝ้าระวังอัตราตายจาก Stroke และ Pneumonia [[อำนาจเจริญ]]
+
+
+## 🔗 Related Topics
+[[pdf]] [[ingest]] [[Amnat_Charoen]] [[Health_Audit]] [[2566]] [[Digital_Health]] [[Cannabis]]

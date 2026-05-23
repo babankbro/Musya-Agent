@@ -50,3 +50,7 @@ source: PDF/อำนาจเจริญ/รายงานผลการน�
 
 ---
 **Longitudinal Trend:** จังหวัดอำนาจเจริญก้าวข้ามวิกฤต COVID-19 สู่การเป็น "Digital Health Province" และเป็นผู้นำด้าน "NCD Remission" ในเขตสุขภาพที่ 10 โดยมีความเข้มแข็งด้าน Cybersecurity เป็นฐานราก [[อำนาจเจริญ]]
+
+
+## 🔗 Related Topics
+[[pdf]] [[ingest]] [[Amnat_Charoen]] [[Health_Audit]] [[2568]] [[Cybersecurity]] [[NCD_Remission]]
