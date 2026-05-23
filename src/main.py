@@ -23,6 +23,7 @@ from src.routers.thaijo import router as thaijo_router
 from src.routers.db_explorer import router as db_explorer_router
 from src.routers.accident_policy import router as accident_policy_router
 from src.routers.accident_chat import router as accident_chat_router
+from src.routers.obsidian import router as obsidian_router
 
 # Apply 429 backoff patch at module load time (before any request is handled)
 from src.agents.agent_defaults import _patch_gemini_429_backoff
@@ -106,6 +107,7 @@ app.include_router(test_ui.router)
 app.include_router(db_explorer_router)
 app.include_router(accident_policy_router)
 app.include_router(accident_chat_router)
+app.include_router(obsidian_router)
 
 
 @app.get("/")
@@ -171,6 +173,15 @@ async def db_explorer_ui_page():
     import pathlib
     from fastapi.responses import HTMLResponse
     html_path = pathlib.Path(__file__).parent.parent / "static" / "db_explorer_ui.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@app.get("/obsidian-knowledge")
+async def obsidian_knowledge_ui_page():
+    """Serve the Obsidian Knowledge Vault UI."""
+    import pathlib
+    from fastapi.responses import HTMLResponse
+    html_path = pathlib.Path(__file__).parent.parent / "static" / "obsidian_knowledge_ui.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
 
 

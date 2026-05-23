@@ -2,7 +2,7 @@
 title: 02 — Agents (MOC)
 type: moc
 tags: [moc, agent]
-updated: 2026-05-16
+updated: 2026-05-17
 ---
 
 # 🤖 02 — Agents
@@ -18,6 +18,8 @@ Per-agent specifications + the unified workflow doc. The Chat pipeline has 10 ag
 | [[02.03 - Agent - Citation & Evidence]] | Agent 4 — evidence registry, APA citations, coverage | `active` |
 | [[02.04 - Reference - APA Format]] | APA 7th formatting rules, citation code ranges (companion to 02.03) | `active` |
 | [[02.05 - Plan - Field Enricher Agent]] | ThaiJO Evidence Sync Agent — fill null cache fields & register evidence (P04) | `plan` |
+| [[02.06 - Plan - Accident Policy Agent]] | Implementation plan for Zone 10 Accident Policy pipeline | `done` |
+| [[02.07 - Agent - Accident Policy (Zone 10)]] | **Spec**: 3-agent pipeline (SqlFetcher → PolicyAnalyst → ReportWriter) + 7 SQL tools + Haddon Matrix | `active` |
 
 ## Agent roster (chat pipeline)
 

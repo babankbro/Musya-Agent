@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_PREFIX: str = "pdf_cache"
 
+    # Obsidian Knowledge Vault
+    OBSIDIAN_VAULT_PATH: str = "obsidian_knowledge"   # relative to Agent/ root
+    OBSIDIAN_DEFAULT_VAULT: str = "health_region_10"
+    OBSIDIAN_ENABLED: bool = True
+    OBSIDIAN_SEARCH_THRESHOLD: float = 0.1  # pg_trgm similarity threshold
+
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000

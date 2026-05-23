@@ -3,6 +3,7 @@ from crewai import Agent
 from src.agents.agent_defaults import agent_retry_kwargs
 from src.tools.common import search_documents, get_indicator_catalog, get_geography_profile
 from src.tools.thaijo import search_thaijo
+from src.tools.obsidian import search_obsidian
 from src.tools.accident import (
     get_accident_summary,
     get_accident_hotspots,
@@ -14,7 +15,7 @@ from src.tools.accident import (
 )
 
 
-def create_retrieval_agent(llm, extra_tools: list | None = None, extra_backstory: str = "", include_thaijo: bool = True) -> Agent:
+def create_retrieval_agent(llm, extra_tools: list | None = None, extra_backstory: str = "", include_thaijo: bool = True, include_obsidian: bool = True) -> Agent:
     tools = [
         search_documents,
         get_indicator_catalog,
@@ -29,7 +30,9 @@ def create_retrieval_agent(llm, extra_tools: list | None = None, extra_backstory
     ]
     if include_thaijo:
         tools.append(search_thaijo)
-    
+    if include_obsidian:
+        tools.append(search_obsidian)
+
     if extra_tools:
         tools.extend(extra_tools)
 
@@ -39,7 +42,9 @@ def create_retrieval_agent(llm, extra_tools: list | None = None, extra_backstory
         "สำคัญมาก: ในการทำ Policy Brief หรือ Analyze Report คุณ **ต้อง** ใช้เครื่องมือ search_thaijo "
         "เพื่อค้นหาหลักฐานทางวิชาการ (evidence) และแนวทางแก้ไข (solutions) จาก ThaiJO ทุกครั้ง "
         "เพื่อให้รายงานมีข้อมูลสนับสนุนที่หนักแน่นและเพียงพอจากงานวิจัยที่เกี่ยวข้อง "
-        "นอกจากนี้ต้องระบุแหล่งที่มาของข้อมูลทุกรายการอย่างชัดเจน "
+        "นอกจากนี้ใช้ search_obsidian เพื่อค้นหาข้อมูล KPI รายอำเภอ นโยบาย และผลการตรวจราชการ "
+        "จาก Obsidian Knowledge Vault เขตสุขภาพที่ 10 เมื่อคำถามเกี่ยวข้องกับข้อมูลเฉพาะพื้นที่ "
+        "ต้องระบุแหล่งที่มาของข้อมูลทุกรายการอย่างชัดเจน "
         "เมื่อ Request Interpreter ระบุ academic_search_needed=true ให้ทำการค้นหาจาก ThaiJO ทันที"
     )
     if extra_backstory:
