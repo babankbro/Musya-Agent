@@ -13,3 +13,12 @@ chroma_data/
 venv/
 .mypy_cache/
 .ruff_cache/
+
+# macOS
+.DS_Store
+
+# local claude config
+.claude/
+
+# nested repo (babankbro/musya-obsidian-document)
+musya_doc/
